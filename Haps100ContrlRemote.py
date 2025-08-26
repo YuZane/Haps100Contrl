@@ -415,15 +415,12 @@ class HAPSAutomationGUI:
         paths = [
             (self.haps_control_var.get(), "haps100control.bat"),
             (self.xactorscmd_var.get(), "xactorscmd.bat"),
-            (self.base_dir_var.get(), "基础目录"),
-            (os.path.join(self.base_dir_var.get(), "system", "targetsystem.tsd"), "targetsystem.tsd")
+            (self.base_dir_var.get(), "基础目录")
         ]
         
         for path, desc in paths:
             if not path:
                 continue
-            # 处理路径中的反斜杠问题
-            path = path.replace("/", "\\")
             cmd = f'if exist "{path}" (echo EXIST) else (echo NOT_EXIST)'
             try:
                 stdin, stdout, stderr = self.ssh_client.exec_command(cmd, timeout=5)
@@ -532,8 +529,8 @@ class HAPSAutomationGUI:
             if not tcl_script:
                 raise ValueError(f"未配置{cmd_type}的TCL脚本路径")
             
-            # 构建命令 - 先切换到基础目录再执行
-            cmd = f'cd /d "{base_dir}" && call "{haps_ctrl}" "{xactorscmd}" "{tcl_script}"'
+            # 构建命令
+            cmd = f'call "{haps_ctrl}" "{xactorscmd}" "{tcl_script}"'
             self.sync_log(f"构建HAPS命令：{cmd}")
             
             # 执行命令
@@ -601,27 +598,33 @@ class HAPSAutomationGUI:
             return False, str(e), -1, ""
 
     def process_data(self, data):
-        """处理数据，优先GBK编码，确保兼容中文特殊字符"""
+        """处理数据，无论是字节还是字符串，避免类型错误"""
         # 如果是字符串，直接返回
         if isinstance(data, str):
             return data.rstrip('\r\n')
             
         # 如果是字节，尝试解码
         if isinstance(data, bytes):
-            # 先尝试GBK解码（专门处理中文环境的特殊字符）
+            # 尝试GBK解码（Windows中文环境）
             try:
-                return data.decode('gbk', errors='replace').rstrip('\r\n')
-            except LookupError:  # 当系统不支持GBK编码时
+                return data.decode('gbk').rstrip('\r\n')
+            except UnicodeDecodeError:
                 pass
                 
             # 尝试UTF-8解码
             try:
-                return data.decode('utf-8', errors='replace').rstrip('\r\n')
-            except LookupError:
+                return data.decode('utf-8').rstrip('\r\n')
+            except UnicodeDecodeError:
                 pass
                 
-            # 最后尝试Latin-1解码
-            return data.decode('latin-1').rstrip('\r\n')
+            # 尝试Latin-1解码（不会失败）
+            try:
+                return data.decode('latin-1').rstrip('\r\n')
+            except UnicodeDecodeError:
+                pass
+                
+            # 所有解码都失败，返回十六进制
+            return f"[无法解码] 十六进制: {data.hex()}"
             
         # 既不是字符串也不是字节
         return str(data)
