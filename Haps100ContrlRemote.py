@@ -9,7 +9,7 @@ import paramiko
 from paramiko.ssh_exception import SSHException, AuthenticationException
 
 class ScrollableFrame(ttk.Frame):
-    """可滚动框架组件 - 彻底修复滚动条不显示问题"""
+    """可滚动框架组件"""
     def __init__(self, container, *args, **kwargs):
         super().__init__(container, *args, **kwargs)
         
@@ -156,7 +156,7 @@ class SSHConfigPanel(ttk.Frame):
             self.ssh_btn.configure(text="连接")
 
 class AutomationPanel(ttk.Frame):
-    """自动化操作面板 - 彻底修复滚动条问题"""
+    """自动化操作面板"""
     def __init__(self, parent, app):
         super().__init__(parent)
         self.app = app
@@ -167,7 +167,7 @@ class AutomationPanel(ttk.Frame):
         self.scrollable_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
         self.content_frame = self.scrollable_frame.content_frame
         
-        # 创建内部容器，确保内容足够长以触发滚动条
+        # 创建内部容器
         self.inner_frame = ttk.Frame(self.content_frame)
         self.inner_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
         self.inner_frame.columnconfigure(1, weight=1)
@@ -269,7 +269,7 @@ class AutomationPanel(ttk.Frame):
         config_row += 1
         
         # 添加额外空白区域确保滚动条能显示
-        for i in range(5):  # 添加5行空白，确保内容足够长
+        for i in range(5):
             ttk.Label(self.inner_frame, text="").grid(row=row, column=0, pady=10)
             row += 1
         
@@ -315,18 +315,21 @@ class AutomationPanel(ttk.Frame):
             self.status_label.configure(foreground="green")
 
 class CustomCommandsPanel(ttk.Frame):
-    """自定义命令面板"""
+    """自定义命令面板 - 添加了滚动条支持"""
     def __init__(self, parent, app):
         super().__init__(parent)
         self.app = app
         self.parent = parent
         self.cmd_entries = []
         
-        # 创建可滚动框架
-        self.main_frame = ScrollableFrame(self)
-        self.main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
-        self.content_frame = self.main_frame.content_frame
-        self.content_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        # 创建可滚动框架（核心修改：使用ScrollableFrame）
+        self.scrollable_frame = ScrollableFrame(self)
+        self.scrollable_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        self.content_frame = self.scrollable_frame.content_frame
+        
+        # 创建内部容器
+        self.inner_frame = ttk.Frame(self.content_frame)
+        self.inner_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
         
         # 创建控件
         self.create_widgets()
@@ -334,24 +337,31 @@ class CustomCommandsPanel(ttk.Frame):
         # 加载命令
         self.create_command_entries()
         
+        # 强制更新滚动区域
+        self.scrollable_frame.force_update()
+        
     def create_widgets(self):
         """创建自定义命令界面控件"""
         # 命令框容器
-        self.cmds_frame = ttk.LabelFrame(self.content_frame, text="自定义远程命令", padding="10")
+        self.cmds_frame = ttk.LabelFrame(self.inner_frame, text="自定义远程命令", padding="10")
         self.cmds_frame.pack(fill=tk.BOTH, expand=True, padx=8, pady=(8, 12))
         self.cmds_frame.columnconfigure(0, weight=1)
         
         # 参数提示
-        tip_frame = ttk.Frame(self.content_frame)
+        tip_frame = ttk.Frame(self.inner_frame)
         tip_frame.pack(fill=tk.X, pady=(0, 8))
         ttk.Label(tip_frame, text="提示：命令将加入队列执行，支持参数 $HAPS_DEVICE $HAPS_SERIAL", foreground="blue").pack(anchor=tk.W)
         
         # 操作按钮区
-        btn_frame = ttk.Frame(self.content_frame)
+        btn_frame = ttk.Frame(self.inner_frame)
         btn_frame.pack(fill=tk.X, pady=(0, 12))
         ttk.Button(btn_frame, text="添加命令框", command=self.add_command_entry).pack(side=tk.LEFT, padx=8)
         ttk.Button(btn_frame, text="删除最后一个", command=self.remove_command_entry).pack(side=tk.LEFT, padx=8)
         ttk.Button(btn_frame, text="保存命令", command=self.save_custom_commands).pack(side=tk.LEFT, padx=8)
+        
+        # 添加额外空白区域确保滚动条能显示
+        for i in range(3):
+            ttk.Label(self.inner_frame, text="").pack(pady=10)
         
     def create_command_entries(self):
         """创建自定义命令输入框"""
@@ -418,9 +428,9 @@ class CustomCommandsPanel(ttk.Frame):
         messagebox.showinfo("保存成功", "自定义命令已保存")
         
     def update_layout(self):
-        """更新布局"""
+        """更新布局并强制刷新滚动区域"""
         self.cmds_frame.update_idletasks()
-        self.main_frame.force_update()
+        self.scrollable_frame.force_update()
 
 class HAPSAutomationGUI:
     def __init__(self, root):
@@ -468,8 +478,7 @@ class HAPSAutomationGUI:
         self.command_queue = Queue()
         self.is_processing = False
         
-        # 主窗口布局 - 修复日志框面积过大问题
-        # 调整比例为5:1，操作区更大，日志区更小
+        # 主窗口布局
         self.root.grid_rowconfigure(0, weight=1)
         self.root.grid_columnconfigure(0, weight=5)  # 操作区占5/6
         self.root.grid_columnconfigure(1, weight=1)  # 日志区占1/6
@@ -630,7 +639,7 @@ class HAPSAutomationGUI:
             except Exception as e:
                 self.sync_log(f"[{desc}] 检查失败：{str(e)}")
 
-    # 命令执行逻辑 - 彻底修复编码错误
+    # 命令执行逻辑
     def queue_command(self, cmd_type):
         """将命令加入队列"""
         if not self.ssh_connected:
@@ -732,7 +741,7 @@ class HAPSAutomationGUI:
             messagebox.showerror("执行异常", str(e))
 
     def run_remote_command(self, cmd):
-        """执行远程命令（完全重构编码处理）"""
+        """执行远程命令"""
         try:
             # 执行命令时指定终端类型，避免某些服务器默认编码问题
             channel = self.ssh_client.get_transport().open_session()
@@ -740,15 +749,14 @@ class HAPSAutomationGUI:
             channel.exec_command(cmd)
             
             output = []
-            error = []
             
-            # 直接读取原始字节流，不进行解码
+            # 直接读取原始字节流，使用GBK解码
             def read_stream():
                 while True:
                     data = channel.recv(1024)
                     if not data:
                         break
-                    # 直接使用GBK解码，不尝试其他编码
+                    # 强制使用GBK解码
                     try:
                         processed = data.decode('gbk', errors='replace')
                     except:
@@ -775,7 +783,6 @@ class HAPSAutomationGUI:
 
     def process_data(self, data):
         """处理数据，强制使用GBK编码解决中文问题"""
-        # 此方法现在主要用于其他地方的数据处理
         if isinstance(data, str):
             return data.rstrip('\r\n')
             
