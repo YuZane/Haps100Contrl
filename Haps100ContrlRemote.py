@@ -8,25 +8,6 @@ from queue import Queue
 import paramiko
 from paramiko.ssh_exception import SSHException, AuthenticationException
 
-class BaseWindow:
-    """基础窗口类，提供通用功能"""
-    def __init__(self, parent, title):
-        self.parent = parent
-        self.window = tk.Toplevel(parent)
-        self.window.title(title)
-        self.window.geometry("600x500")
-        self.window.minsize(500, 400)
-        self.window.protocol("WM_DELETE_WINDOW", self.on_close)
-        self.is_open = True
-        
-        # 禁止窗口大小变化时的自动重绘布局
-        self.window.grid_propagate(False)
-        
-    def on_close(self):
-        """关闭窗口时的处理"""
-        self.is_open = False
-        self.window.destroy()
-
 class ScrollableFrame(ttk.Frame):
     """可滚动框架组件"""
     def __init__(self, container, *args, **kwargs):
@@ -69,20 +50,19 @@ class ScrollableFrame(ttk.Frame):
     def _on_mousewheel(self, event):
         self.canvas.yview_scroll(int(-1*(event.delta/120)), "units")
 
-class SSHConfigWindow(BaseWindow):
-    """SSH配置窗口"""
+class SSHConfigPanel(ttk.Frame):
+    """SSH配置面板"""
     def __init__(self, parent, app):
-        super().__init__(parent, "SSH配置")
+        super().__init__(parent)
         self.app = app
-        
-        # 配置网格
-        self.window.grid_rowconfigure(0, weight=1)
-        self.window.grid_columnconfigure(0, weight=1)
+        self.parent = parent
         
         # 创建主框架
-        self.main_frame = ttk.Frame(self.window, padding="15")
-        self.main_frame.grid(row=0, column=0, sticky=tk.NSEW, padx=10, pady=10)
-        self.main_frame.grid_columnconfigure(1, weight=1)
+        self.main_frame = ScrollableFrame(self)
+        self.main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        self.content_frame = self.main_frame.content_frame
+        self.content_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        self.content_frame.columnconfigure(1, weight=1)
         
         # 创建控件
         self.create_widgets()
@@ -90,28 +70,31 @@ class SSHConfigWindow(BaseWindow):
         # 加载配置
         self.load_config()
         
+        # 绑定连接状态更新事件
+        self.app.root.bind("<<SSHStatusChanged>>", self.update_ssh_status)
+        
     def create_widgets(self):
         """创建SSH配置界面控件"""
         # SSH配置控件
-        ttk.Label(self.main_frame, text="IP地址:").grid(row=0, column=0, sticky=tk.W, padx=8, pady=8)
+        ttk.Label(self.content_frame, text="IP地址:").grid(row=0, column=0, sticky=tk.W, padx=8, pady=8)
         self.ssh_host_var = tk.StringVar()
-        ttk.Entry(self.main_frame, textvariable=self.ssh_host_var).grid(row=0, column=1, sticky=tk.EW, padx=8, pady=8)
+        ttk.Entry(self.content_frame, textvariable=self.ssh_host_var).grid(row=0, column=1, sticky=tk.EW, padx=8, pady=8)
         
-        ttk.Label(self.main_frame, text="端口:").grid(row=1, column=0, sticky=tk.W, padx=8, pady=8)
+        ttk.Label(self.content_frame, text="端口:").grid(row=1, column=0, sticky=tk.W, padx=8, pady=8)
         self.ssh_port_var = tk.IntVar(value=22)
-        ttk.Entry(self.main_frame, textvariable=self.ssh_port_var, width=10).grid(row=1, column=1, sticky=tk.W, padx=8, pady=8)
+        ttk.Entry(self.content_frame, textvariable=self.ssh_port_var, width=10).grid(row=1, column=1, sticky=tk.W, padx=8, pady=8)
         
-        ttk.Label(self.main_frame, text="用户名:").grid(row=2, column=0, sticky=tk.W, padx=8, pady=8)
+        ttk.Label(self.content_frame, text="用户名:").grid(row=2, column=0, sticky=tk.W, padx=8, pady=8)
         self.ssh_user_var = tk.StringVar()
-        ttk.Entry(self.main_frame, textvariable=self.ssh_user_var).grid(row=2, column=1, sticky=tk.EW, padx=8, pady=8)
+        ttk.Entry(self.content_frame, textvariable=self.ssh_user_var).grid(row=2, column=1, sticky=tk.EW, padx=8, pady=8)
         
-        ttk.Label(self.main_frame, text="密码:").grid(row=3, column=0, sticky=tk.W, padx=8, pady=8)
+        ttk.Label(self.content_frame, text="密码:").grid(row=3, column=0, sticky=tk.W, padx=8, pady=8)
         self.ssh_password_var = tk.StringVar()
-        pwd_entry = ttk.Entry(self.main_frame, textvariable=self.ssh_password_var, show="*")
+        pwd_entry = ttk.Entry(self.content_frame, textvariable=self.ssh_password_var, show="*")
         pwd_entry.grid(row=3, column=1, sticky=tk.EW, padx=8, pady=8)
         
         # 连接状态
-        status_frame = ttk.Frame(self.main_frame)
+        status_frame = ttk.Frame(self.content_frame)
         status_frame.grid(row=4, column=0, columnspan=2, sticky=tk.EW, pady=10)
         
         self.ssh_status_var = tk.StringVar(value="未连接")
@@ -119,7 +102,7 @@ class SSHConfigWindow(BaseWindow):
         self.ssh_status_label.pack(side=tk.LEFT, padx=5)
         
         # 按钮区
-        btn_frame = ttk.Frame(self.main_frame)
+        btn_frame = ttk.Frame(self.content_frame)
         btn_frame.grid(row=5, column=0, columnspan=2, sticky=tk.EW, pady=10)
         
         self.ssh_btn = ttk.Button(btn_frame, text="连接", command=self.toggle_ssh_connection)
@@ -127,9 +110,6 @@ class SSHConfigWindow(BaseWindow):
         
         save_btn = ttk.Button(btn_frame, text="保存配置", command=self.save_config)
         save_btn.pack(side=tk.RIGHT, padx=8)
-        
-        # 绑定连接状态更新事件
-        self.app.root.bind("<<SSHStatusChanged>>", self.update_ssh_status)
         
     def load_config(self):
         """加载SSH配置"""
@@ -168,22 +148,19 @@ class SSHConfigWindow(BaseWindow):
             self.ssh_status_label.configure(foreground="red")
             self.ssh_btn.configure(text="连接")
 
-class AutomationWindow(BaseWindow):
-    """自动化操作窗口"""
+class AutomationPanel(ttk.Frame):
+    """自动化操作面板"""
     def __init__(self, parent, app):
-        super().__init__(parent, "自动化操作")
+        super().__init__(parent)
         self.app = app
-        
-        # 配置网格
-        self.window.grid_rowconfigure(0, weight=1)
-        self.window.grid_columnconfigure(0, weight=1)
+        self.parent = parent
         
         # 创建可滚动框架
-        self.scrollable_frame = ScrollableFrame(self.window)
-        self.scrollable_frame.grid(row=0, column=0, sticky=tk.NSEW, padx=10, pady=10)
-        self.main_frame = self.scrollable_frame.content_frame
+        self.main_frame = ScrollableFrame(self)
         self.main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
-        self.main_frame.columnconfigure(1, weight=1)
+        self.content_frame = self.main_frame.content_frame
+        self.content_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        self.content_frame.columnconfigure(1, weight=1)
         
         # 创建控件
         self.create_widgets()
@@ -197,13 +174,13 @@ class AutomationWindow(BaseWindow):
     def create_widgets(self):
         """创建自动化操作界面控件"""
         # 基础路径配置
-        ttk.Label(self.main_frame, text="远程基础路径:").grid(row=0, column=0, sticky=tk.W, padx=8, pady=8)
+        ttk.Label(self.content_frame, text="远程基础路径:").grid(row=0, column=0, sticky=tk.W, padx=8, pady=8)
         self.base_dir_var = tk.StringVar()
-        self.base_dir_entry = ttk.Entry(self.main_frame, textvariable=self.base_dir_var)
+        self.base_dir_entry = ttk.Entry(self.content_frame, textvariable=self.base_dir_var)
         self.base_dir_entry.grid(row=0, column=1, sticky=tk.EW, padx=8, pady=8)
         
         # 执行状态显示
-        status_frame = ttk.Frame(self.main_frame)
+        status_frame = ttk.Frame(self.content_frame)
         status_frame.grid(row=1, column=0, columnspan=2, sticky=tk.EW, padx=8, pady=8)
         ttk.Label(status_frame, text="执行状态:").pack(side=tk.LEFT, padx=5)
         self.exec_status_var = tk.StringVar(value="就绪")
@@ -214,7 +191,7 @@ class AutomationWindow(BaseWindow):
         clear_queue_btn.pack(side=tk.RIGHT, padx=5)
         
         # 操作按钮区
-        btn_frame = ttk.LabelFrame(self.main_frame, text="HAPS操作", padding="10")
+        btn_frame = ttk.LabelFrame(self.content_frame, text="HAPS操作", padding="10")
         btn_frame.grid(row=2, column=0, columnspan=2, sticky=tk.EW, padx=8, pady=8)
         
         # Load按钮组
@@ -234,7 +211,7 @@ class AutomationWindow(BaseWindow):
         ttk.Button(reset_frame, text="Reset Slave", command=lambda: self.app.queue_command("reset_slave")).pack(side=tk.LEFT, padx=8)
         
         # 路径配置区
-        config_frame = ttk.LabelFrame(self.main_frame, text="远程文件配置", padding="10")
+        config_frame = ttk.LabelFrame(self.content_frame, text="远程文件配置", padding="10")
         config_frame.grid(row=3, column=0, columnspan=2, sticky=tk.EW, padx=8, pady=8)
         config_frame.columnconfigure(1, weight=1)
         
@@ -309,22 +286,19 @@ class AutomationWindow(BaseWindow):
             self.exec_status_var.set("就绪")
             self.status_label.configure(foreground="green")
 
-class CustomCommandsWindow(BaseWindow):
-    """自定义命令窗口"""
+class CustomCommandsPanel(ttk.Frame):
+    """自定义命令面板"""
     def __init__(self, parent, app):
-        super().__init__(parent, "自定义命令")
+        super().__init__(parent)
         self.app = app
+        self.parent = parent
         self.cmd_entries = []
         
-        # 配置网格
-        self.window.grid_rowconfigure(0, weight=1)
-        self.window.grid_columnconfigure(0, weight=1)
-        
         # 创建可滚动框架
-        self.scrollable_frame = ScrollableFrame(self.window)
-        self.scrollable_frame.grid(row=0, column=0, sticky=tk.NSEW, padx=10, pady=10)
-        self.main_frame = self.scrollable_frame.content_frame
+        self.main_frame = ScrollableFrame(self)
         self.main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        self.content_frame = self.main_frame.content_frame
+        self.content_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
         
         # 创建控件
         self.create_widgets()
@@ -335,17 +309,17 @@ class CustomCommandsWindow(BaseWindow):
     def create_widgets(self):
         """创建自定义命令界面控件"""
         # 命令框容器
-        self.cmds_frame = ttk.LabelFrame(self.main_frame, text="自定义远程命令", padding="10")
+        self.cmds_frame = ttk.LabelFrame(self.content_frame, text="自定义远程命令", padding="10")
         self.cmds_frame.pack(fill=tk.BOTH, expand=True, padx=8, pady=(8, 12))
         self.cmds_frame.columnconfigure(0, weight=1)
         
         # 参数提示
-        tip_frame = ttk.Frame(self.main_frame)
+        tip_frame = ttk.Frame(self.content_frame)
         tip_frame.pack(fill=tk.X, pady=(0, 8))
         ttk.Label(tip_frame, text="提示：命令将加入队列执行，支持参数 $HAPS_DEVICE $HAPS_SERIAL", foreground="blue").pack(anchor=tk.W)
         
         # 操作按钮区
-        btn_frame = ttk.Frame(self.main_frame)
+        btn_frame = ttk.Frame(self.content_frame)
         btn_frame.pack(fill=tk.X, pady=(0, 12))
         ttk.Button(btn_frame, text="添加命令框", command=self.add_command_entry).pack(side=tk.LEFT, padx=8)
         ttk.Button(btn_frame, text="删除最后一个", command=self.remove_command_entry).pack(side=tk.LEFT, padx=8)
@@ -418,71 +392,25 @@ class CustomCommandsWindow(BaseWindow):
     def update_layout(self):
         """更新布局"""
         self.cmds_frame.update_idletasks()
-        self.scrollable_frame._update_scrollregion()
+        self.main_frame._update_scrollregion()
 
 class HAPSAutomationGUI:
     def __init__(self, root):
         self.root = root
         self.root.title("HAPS远程自动化控制中心")
-        self.root.geometry("800x500")
-        self.root.minsize(600, 400)
+        self.root.geometry("1200x600")
+        self.root.minsize(1000, 500)
         
-        # 配置主窗口网格
-        self.root.grid_rowconfigure(0, weight=1)
-        self.root.grid_rowconfigure(1, weight=0)
-        self.root.grid_columnconfigure(0, weight=1)
-        
-        # 子窗口引用
-        self.ssh_window = None
-        self.automation_window = None
-        self.custom_commands_window = None
-        
-        # SSH连接状态
-        self.ssh_client = None
-        self.ssh_connected = False
-        
-        # 命令队列和执行状态
-        self.command_queue = Queue()
-        self.is_processing = False
-        
+        # ------------------------------ 1. 先初始化日志相关属性（关键修复）------------------------------
         # 日志更新节流控制
         self._log_update_timer = None
         self._pending_logs = []
         self._log_updating = False
         
-        # 用于临时冻结界面更新
+        # 用于临时冻结界面更新（在sync_log前初始化）
         self._freeze_ui = False
         
-        # ------------------------------ 主窗口组件 ------------------------------
-        # 日志区域
-        self.log_frame = ttk.LabelFrame(root, text="执行日志", padding="12")
-        self.log_frame.grid(row=0, column=0, sticky=tk.NSEW, padx=10, pady=10)
-        self.log_frame.grid_rowconfigure(1, weight=1)
-        self.log_frame.grid_columnconfigure(0, weight=1)
-        
-        # 日志控制按钮区
-        log_ctrl_frame = ttk.Frame(self.log_frame, height=30)
-        log_ctrl_frame.grid(row=0, column=0, sticky=tk.EW, pady=(0, 8))
-        log_ctrl_frame.grid_propagate(False)
-        
-        clear_log_btn = ttk.Button(log_ctrl_frame, text="清空日志", command=self.clear_log)
-        clear_log_btn.pack(side=tk.RIGHT, padx=5)
-        
-        # 日志文本框
-        self.log_text = scrolledtext.ScrolledText(
-            self.log_frame, 
-            wrap=tk.WORD, 
-            font=("Consolas", 9),
-            state=tk.DISABLED,
-            padx=8,
-            pady=8
-        )
-        self.log_text.grid(row=1, column=0, sticky=tk.NSEW, pady=(0, 5))
-        
-        # 功能按钮区
-        self.buttons_frame = ttk.Frame(root, padding="10")
-        self.buttons_frame.grid(row=1, column=0, sticky=tk.EW, padx=10, pady=(0, 10))
-        
+        # ------------------------------ 2. 初始化配置相关属性 ------------------------------
         # 配置文件路径
         self.config_file = "haps_config.json"
         
@@ -508,76 +436,81 @@ class HAPSAutomationGUI:
             "custom_commands": [""]
         }
         
-        # 创建功能按钮
-        self.create_function_buttons()
-        
-        # 加载配置文件
+        # 加载配置文件（现在调用sync_log时，_freeze_ui已存在）
         self.load_config()
+        
+        # ------------------------------ 3. 初始化其他属性 ------------------------------
+        # SSH连接状态
+        self.ssh_client = None
+        self.ssh_connected = False
+        
+        # 命令队列和执行状态
+        self.command_queue = Queue()
+        self.is_processing = False
+        
+        # 日志更新节流控制
+        self._log_update_timer = None
+        self._pending_logs = []
+        self._log_updating = False
+        
+        # 用于临时冻结界面更新
+        self._freeze_ui = False
+        
+        # ------------------------------ 界面布局（在配置初始化之后）------------------------------
+        # 主窗口分为左右两部分：左侧操作区，右侧日志区
+        self.root.grid_rowconfigure(0, weight=1)
+        self.root.grid_columnconfigure(0, weight=3)  # 操作区占3/5宽度
+        self.root.grid_columnconfigure(1, weight=2)  # 日志区占2/5宽度
+        
+        # 左侧操作区
+        self.operation_frame = ttk.Frame(root)
+        self.operation_frame.grid(row=0, column=0, sticky=tk.NSEW, padx=(10, 5), pady=10)
+        
+        # 创建标签页控件
+        self.notebook = ttk.Notebook(self.operation_frame)
+        self.notebook.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        
+        # 创建三个功能面板（现在config已经初始化完成）
+        self.ssh_panel = SSHConfigPanel(self.notebook, self)
+        self.automation_panel = AutomationPanel(self.notebook, self)
+        self.custom_commands_panel = CustomCommandsPanel(self.notebook, self)
+        
+        # 将面板添加到标签页
+        self.notebook.add(self.ssh_panel, text="SSH配置")
+        self.notebook.add(self.automation_panel, text="自动化操作")
+        self.notebook.add(self.custom_commands_panel, text="自定义命令")
+        
+        # ------------------------------ 右侧日志区 ------------------------------
+        self.log_frame = ttk.LabelFrame(root, text="执行日志", padding="12")
+        self.log_frame.grid(row=0, column=1, sticky=tk.NSEW, padx=(5, 10), pady=10)
+        self.log_frame.grid_rowconfigure(1, weight=1)
+        self.log_frame.grid_columnconfigure(0, weight=1)
+        
+        # 日志控制按钮区
+        log_ctrl_frame = ttk.Frame(self.log_frame, height=30)
+        log_ctrl_frame.grid(row=0, column=0, sticky=tk.EW, pady=(0, 8))
+        log_ctrl_frame.grid_propagate(False)
+        
+        clear_log_btn = ttk.Button(log_ctrl_frame, text="清空日志", command=self.clear_log)
+        clear_log_btn.pack(side=tk.RIGHT, padx=5)
+        
+        # 日志文本框
+        self.log_text = scrolledtext.ScrolledText(
+            self.log_frame, 
+            wrap=tk.WORD, 
+            font=("Consolas", 9),
+            state=tk.DISABLED,
+            padx=8,
+            pady=8
+        )
+        self.log_text.grid(row=1, column=0, sticky=tk.NSEW, pady=(0, 5))
+        
+        # 底部状态栏 - 显示SSH连接状态
+        self.status_bar = ttk.Label(root, text="SSH未连接", relief=tk.SUNKEN, anchor=tk.W)
+        self.status_bar.grid(row=1, column=0, columnspan=2, sticky=tk.EW, padx=10, pady=(0, 5))
         
         # 窗口关闭事件
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
-
-    def create_function_buttons(self):
-        """创建功能按钮"""
-        # 按钮样式
-        btn_style = ttk.Style()
-        btn_style.configure("Large.TButton", font=("微软雅黑", 10))
-        
-        # SSH配置按钮
-        ttk.Button(
-            self.buttons_frame, 
-            text="SSH配置", 
-            command=self.open_ssh_window,
-            style="Large.TButton",
-            width=15
-        ).pack(side=tk.LEFT, padx=10)
-        
-        # 自动化操作按钮
-        ttk.Button(
-            self.buttons_frame, 
-            text="自动化操作", 
-            command=self.open_automation_window,
-            style="Large.TButton",
-            width=15
-        ).pack(side=tk.LEFT, padx=10)
-        
-        # 自定义命令按钮
-        ttk.Button(
-            self.buttons_frame, 
-            text="自定义命令", 
-            command=self.open_custom_commands_window,
-            style="Large.TButton",
-            width=15
-        ).pack(side=tk.LEFT, padx=10)
-        
-        # 连接状态显示
-        self.ssh_status_var = tk.StringVar(value="SSH未连接")
-        ttk.Label(
-            self.buttons_frame, 
-            textvariable=self.ssh_status_var, 
-            font=("微软雅黑", 10)
-        ).pack(side=tk.RIGHT, padx=10)
-
-    def open_ssh_window(self):
-        """打开SSH配置窗口"""
-        if not self.ssh_window or not self.ssh_window.is_open:
-            self.ssh_window = SSHConfigWindow(self.root, self)
-        else:
-            self.ssh_window.window.lift()
-
-    def open_automation_window(self):
-        """打开自动化操作窗口"""
-        if not self.automation_window or not self.automation_window.is_open:
-            self.automation_window = AutomationWindow(self.root, self)
-        else:
-            self.automation_window.window.lift()
-
-    def open_custom_commands_window(self):
-        """打开自定义命令窗口"""
-        if not self.custom_commands_window or not self.custom_commands_window.is_open:
-            self.custom_commands_window = CustomCommandsWindow(self.root, self)
-        else:
-            self.custom_commands_window.window.lift()
 
     # ------------------------------ SSH连接逻辑 ------------------------------
     def connect_ssh(self):
@@ -620,7 +553,7 @@ class HAPSAutomationGUI:
                 
             if "HAPS_CONNECTED" in output or "484150535f434f4e4e4543544544" in output:
                 self.ssh_connected = True
-                self.ssh_status_var.set(f"SSH已连接: {host}")
+                self.status_bar.config(text=f"SSH已连接: {host}")
                 self.sync_log(f"SSH连接成功：{host}:{port}")
                 self.check_remote_paths()
             else:
@@ -651,7 +584,7 @@ class HAPSAutomationGUI:
                 self.sync_log(f"断开SSH时出错：{str(e)}")
         
         self.ssh_connected = False
-        self.ssh_status_var.set("SSH未连接")
+        self.status_bar.config(text="SSH未连接")
         self.ssh_client = None
         
         # 触发SSH状态更新事件
@@ -988,14 +921,6 @@ class HAPSAutomationGUI:
         # 断开SSH连接
         if self.ssh_connected:
             self.disconnect_ssh()
-            
-        # 关闭所有子窗口
-        if self.ssh_window and self.ssh_window.is_open:
-            self.ssh_window.on_close()
-        if self.automation_window and self.automation_window.is_open:
-            self.automation_window.on_close()
-        if self.custom_commands_window and self.custom_commands_window.is_open:
-            self.custom_commands_window.on_close()
             
         # 关闭主窗口
         self.root.destroy()
