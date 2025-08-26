@@ -46,6 +46,10 @@ class HAPSAutomationGUI:
         self.root.geometry("1200x700")
         self.root.minsize(1000, 600)
         
+        # 配置网格权重，使界面可缩放
+        self.root.grid_rowconfigure(1, weight=1)
+        self.root.grid_columnconfigure(0, weight=1)
+        
         # SSH连接状态
         self.ssh_client = None
         self.ssh_connected = False
@@ -54,33 +58,32 @@ class HAPSAutomationGUI:
         self.command_queue = Queue()
         self.is_processing = False
         
-        # 主容器布局（确保左右高度一致）
+        # ------------------------------ 顶部SSH配置区 ------------------------------
+        self.ssh_frame = ttk.LabelFrame(root, text="远程SSH配置", padding="10")
+        self.ssh_frame.grid(row=0, column=0, sticky=tk.NSEW, padx=5, pady=(5, 0))
+        self.ssh_frame.grid_columnconfigure(1, weight=1)
+        self.ssh_frame.grid_columnconfigure(3, weight=1)
+        self.ssh_frame.grid_columnconfigure(5, weight=1)
+        self.ssh_frame.grid_columnconfigure(7, weight=1)
+        
+        # ------------------------------ 下方主内容区 ------------------------------
         self.main_container = ttk.Frame(root)
-        self.main_container.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        self.main_container.grid(row=1, column=0, sticky=tk.NSEW, padx=5, pady=5)
+        self.main_container.grid_rowconfigure(0, weight=1)
+        self.main_container.grid_columnconfigure(0, weight=5)  # 左侧占50%宽度
+        self.main_container.grid_columnconfigure(1, weight=5)  # 右侧占50%宽度
         
-        # 左侧容器（55%宽度）
-        self.left_container = ttk.Frame(self.main_container, width=550)
-        self.left_container.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 5))
-        self.left_container.pack_propagate(False)
-        
-        # 右侧日志容器（45%宽度）
-        self.right_container = ttk.Frame(self.main_container, width=450)
-        self.right_container.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=(5, 0))
-        self.right_container.pack_propagate(False)
-        
-        # 顶部SSH配置区
-        self.ssh_frame = ttk.LabelFrame(self.left_container, text="远程SSH配置", padding="10")
-        self.ssh_frame.pack(fill=tk.X, padx=5, pady=(0, 5))
-        
-        # 左侧滚动内容区
-        self.scrollable_left_frame = ScrollableFrame(self.left_container)
-        self.scrollable_left_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
-        self.left_frame = self.scrollable_left_frame.content_frame
+        # 左侧操作区
+        self.left_container = ttk.Frame(self.main_container)
+        self.left_container.grid(row=0, column=0, sticky=tk.NSEW, padx=(0, 5))
+        self.left_container.grid_rowconfigure(0, weight=1)
+        self.left_container.grid_columnconfigure(0, weight=1)
         
         # 右侧日志区
-        self.log_frame = ttk.LabelFrame(self.right_container, text="执行日志", padding="10")
-        self.log_frame.pack(fill=tk.BOTH, expand=True)
-        self.log_frame.pack_propagate(False)
+        self.right_container = ttk.Frame(self.main_container)
+        self.right_container.grid(row=0, column=1, sticky=tk.NSEW, padx=(5, 0))
+        self.right_container.grid_rowconfigure(0, weight=1)
+        self.right_container.grid_columnconfigure(0, weight=1)
         
         # 配置文件路径
         self.config_file = "haps_config.json"
@@ -144,39 +147,15 @@ class HAPSAutomationGUI:
     def create_widgets(self):
         """创建所有界面元素"""
         self.init_ssh_frame()
-        
-        # 标签页控件
-        self.tab_control = ttk.Notebook(self.left_frame)
-        self.tab_control.pack(fill=tk.X, expand=False, padx=5, pady=5)
-        
-        # 自动化操作标签页
-        self.tab1_frame = ttk.Frame(self.tab_control)
-        self.tab1_scrollable = ScrollableFrame(self.tab1_frame)
-        self.tab1_scrollable.pack(fill=tk.BOTH, expand=True)
-        self.tab1 = self.tab1_scrollable.content_frame
-        self.tab_control.add(self.tab1_frame, text="自动化操作")
-        
-        # 自定义命令标签页
-        self.tab2_frame = ttk.Frame(self.tab_control)
-        self.tab2_scrollable = ScrollableFrame(self.tab2_frame)
-        self.tab2_scrollable.pack(fill=tk.BOTH, expand=True)
-        self.tab2 = self.tab2_scrollable.content_frame
-        self.tab_control.add(self.tab2_frame, text="自定义命令")
-        
-        # 初始化各标签页
-        self.init_tab1()
-        self.init_tab2()
-        self.init_log_area()
+        self.init_left_operation_area()
+        self.init_right_log_area()
         
         # 显示临时日志
         self.flush_temp_logs()
 
     def init_ssh_frame(self):
         """初始化SSH配置区域"""
-        self.ssh_frame.columnconfigure(1, weight=1)
-        self.ssh_frame.columnconfigure(3, weight=1)
-        self.ssh_frame.columnconfigure(5, weight=1)
-        
+        # SSH配置控件
         ttk.Label(self.ssh_frame, text="IP地址:").grid(row=0, column=0, sticky=tk.W, padx=5, pady=5)
         ttk.Entry(self.ssh_frame, textvariable=self.ssh_host_var).grid(row=0, column=1, sticky=tk.EW, padx=5, pady=5)
         
@@ -196,6 +175,59 @@ class HAPSAutomationGUI:
         
         self.ssh_btn = ttk.Button(self.ssh_frame, text="连接", command=self.toggle_ssh_connection)
         self.ssh_btn.grid(row=0, column=9, padx=5, pady=5)
+
+    def init_left_operation_area(self):
+        """初始化左侧操作区域"""
+        # 左侧使用可滚动框架包装
+        self.scrollable_left_frame = ScrollableFrame(self.left_container)
+        self.scrollable_left_frame.grid(row=0, column=0, sticky=tk.NSEW)
+        self.left_frame = self.scrollable_left_frame.content_frame
+        
+        # 标签页控件 - 包含自动化操作和自定义命令
+        self.tab_control = ttk.Notebook(self.left_frame)
+        self.tab_control.pack(fill=tk.X, expand=False, padx=5, pady=5)
+        
+        # 自动化操作标签页
+        self.tab1_frame = ttk.Frame(self.tab_control)
+        self.tab1_scrollable = ScrollableFrame(self.tab1_frame)
+        self.tab1_scrollable.pack(fill=tk.BOTH, expand=True)
+        self.tab1 = self.tab1_scrollable.content_frame
+        self.tab_control.add(self.tab1_frame, text="自动化操作")
+        
+        # 自定义命令标签页
+        self.tab2_frame = ttk.Frame(self.tab_control)
+        self.tab2_scrollable = ScrollableFrame(self.tab2_frame)
+        self.tab2_scrollable.pack(fill=tk.BOTH, expand=True)
+        self.tab2 = self.tab2_scrollable.content_frame
+        self.tab_control.add(self.tab2_frame, text="自定义命令")
+        
+        # 初始化各标签页内容
+        self.init_tab1()
+        self.init_tab2()
+
+    def init_right_log_area(self):
+        """初始化右侧日志区域"""
+        self.log_frame = ttk.LabelFrame(self.right_container, text="执行日志", padding="10")
+        self.log_frame.grid(row=0, column=0, sticky=tk.NSEW)
+        self.log_frame.grid_rowconfigure(1, weight=1)
+        self.log_frame.grid_columnconfigure(0, weight=1)
+        
+        # 日志控制按钮区
+        log_ctrl_frame = ttk.Frame(self.log_frame, height=30)
+        log_ctrl_frame.grid(row=0, column=0, sticky=tk.EW, pady=(0, 5))
+        log_ctrl_frame.pack_propagate(False)
+        
+        clear_log_btn = ttk.Button(log_ctrl_frame, text="清空日志", command=self.clear_log)
+        clear_log_btn.pack(side=tk.RIGHT, padx=5)
+        
+        # 日志文本框
+        self.log_text = scrolledtext.ScrolledText(
+            self.log_frame, 
+            wrap=tk.WORD, 
+            font=("Consolas", 9),
+            state=tk.DISABLED
+        )
+        self.log_text.grid(row=1, column=0, sticky=tk.NSEW, pady=(0, 5))
 
     def init_tab1(self):
         """初始化自动化操作界面"""
@@ -285,7 +317,7 @@ class HAPSAutomationGUI:
         main_frame.pack(fill=tk.X, expand=False)
         
         # 命令框容器
-        self.cmds_frame = ttk.LabelFrame(main_frame, text="自定义远程命令", padding="10", width=480)
+        self.cmds_frame = ttk.LabelFrame(main_frame, text="自定义远程命令", padding="10")
         self.cmds_frame.pack(fill=tk.X, expand=False, padx=5, pady=(5, 10))
         self.cmds_frame.pack_propagate(False)
         self.cmds_frame.columnconfigure(0, weight=1)
@@ -308,25 +340,6 @@ class HAPSAutomationGUI:
         # 命令输入框
         self.cmd_entries = []
         self.create_command_entries()
-
-    def init_log_area(self):
-        """初始化日志界面"""
-        # 日志控制按钮区
-        log_ctrl_frame = ttk.Frame(self.log_frame, height=30)
-        log_ctrl_frame.pack(fill=tk.X, pady=(0, 5))
-        log_ctrl_frame.pack_propagate(False)
-        
-        clear_log_btn = ttk.Button(log_ctrl_frame, text="清空日志", command=self.clear_log)
-        clear_log_btn.pack(side=tk.RIGHT, padx=5)
-        
-        # 日志文本框
-        self.log_text = scrolledtext.ScrolledText(
-            self.log_frame, 
-            wrap=tk.WORD, 
-            font=("Consolas", 9),
-            state=tk.DISABLED
-        )
-        self.log_text.pack(fill=tk.BOTH, expand=True, pady=(0, 5))
 
     # ------------------------------ SSH连接逻辑 ------------------------------
     def toggle_ssh_connection(self):
