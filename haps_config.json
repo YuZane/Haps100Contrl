@@ -1,0 +1,13 @@
+{
+    "base_dir": "",
+    "xactorscmd_path": "C:\\Synopsys\\protocomp-rtV-2024.09\\bin\\xactorscmd.bat",
+    "load_all_tcl": "tcl\\load_all.tcl",
+    "load_master_tcl": "tcl\\load_master.tcl",
+    "load_slave_tcl": "tcl\\load_slave.tcl",
+    "reset_all_tcl": "tcl\\reset_all.tcl",
+    "reset_master_tcl": "tcl\\reset_master.tcl",
+    "reset_slave_tcl": "tcl\\reset_slave.tcl",
+    "custom_commands": [
+        ""
+    ]
+}

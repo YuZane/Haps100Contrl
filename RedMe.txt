@@ -1,0 +1,2 @@
+# pyinstaller -F -w -i 图标文件.ico --add-data "haps_control_default.tcl;." --add-data "haps_config.json;." Haps100Contrl.py
+pyinstaller -F -w --add-data "haps_control_default.tcl;." Haps100Contrl.py
