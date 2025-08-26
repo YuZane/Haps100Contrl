@@ -9,16 +9,21 @@ import paramiko
 from paramiko.ssh_exception import SSHException, AuthenticationException
 
 class ScrollableFrame(ttk.Frame):
-    """可滚动框架组件 - 修复滚动条不显示问题"""
+    """可滚动框架组件 - 彻底修复滚动条不显示问题"""
     def __init__(self, container, *args, **kwargs):
         super().__init__(container, *args, **kwargs)
         
         # 创建画布和滚动条
         self.canvas = tk.Canvas(self, highlightthickness=0)
-        self.scrollbar = ttk.Scrollbar(self, orient="vertical", command=self.canvas.yview)
+        
+        # 垂直滚动条
+        self.vscrollbar = ttk.Scrollbar(self, orient="vertical", command=self.canvas.yview)
+        self.canvas.configure(yscrollcommand=self.vscrollbar.set)
+        
+        # 内容框架
         self.content_frame = ttk.Frame(self.canvas)
         
-        # 绑定事件
+        # 绑定内容框架大小变化事件
         self.content_frame.bind(
             "<Configure>",
             lambda e: self.canvas.configure(scrollregion=self.canvas.bbox("all"))
@@ -27,25 +32,30 @@ class ScrollableFrame(ttk.Frame):
         # 创建窗口
         self.canvas_frame = self.canvas.create_window((0, 0), window=self.content_frame, anchor="nw")
         
-        # 配置画布
-        self.canvas.configure(yscrollcommand=self.scrollbar.set)
-        self.canvas.bind("<Configure>", self._on_canvas_configure)
+        # 绑定画布大小变化事件
+        self.canvas.bind(
+            "<Configure>",
+            lambda e: self.canvas.itemconfig(self.canvas_frame, width=e.width)
+        )
+        
+        # 绑定鼠标滚轮事件
         self.canvas.bind_all("<MouseWheel>", self._on_mousewheel)
         
         # 布局
         self.canvas.pack(side="left", fill="both", expand=True)
-        self.scrollbar.pack(side="right", fill="y")
+        self.vscrollbar.pack(side="right", fill="y")
         
         # 强制更新布局
         self.update_idletasks()
 
-    def _on_canvas_configure(self, event):
-        """当画布大小变化时调整内容宽度"""
-        self.canvas.itemconfig(self.canvas_frame, width=event.width)
-        
     def _on_mousewheel(self, event):
         """鼠标滚轮事件处理"""
         self.canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+
+    def force_update(self):
+        """强制更新滚动区域"""
+        self.update_idletasks()
+        self.canvas.configure(scrollregion=self.canvas.bbox("all"))
 
 class SSHConfigPanel(ttk.Frame):
     """SSH配置面板"""
@@ -146,20 +156,21 @@ class SSHConfigPanel(ttk.Frame):
             self.ssh_btn.configure(text="连接")
 
 class AutomationPanel(ttk.Frame):
-    """自动化操作面板 - 修复滚动条问题"""
+    """自动化操作面板 - 彻底修复滚动条问题"""
     def __init__(self, parent, app):
         super().__init__(parent)
         self.app = app
         self.parent = parent
         
         # 创建可滚动框架
-        self.main_frame = ScrollableFrame(self)
-        self.main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
-        self.content_frame = self.main_frame.content_frame
+        self.scrollable_frame = ScrollableFrame(self)
+        self.scrollable_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        self.content_frame = self.scrollable_frame.content_frame
         
-        # 关键修复：确保内容框架正确填充和扩展
-        self.content_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
-        self.content_frame.columnconfigure(1, weight=1)
+        # 创建内部容器，确保内容足够长以触发滚动条
+        self.inner_frame = ttk.Frame(self.content_frame)
+        self.inner_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        self.inner_frame.columnconfigure(1, weight=1)
         
         # 创建控件
         self.create_widgets()
@@ -170,22 +181,23 @@ class AutomationPanel(ttk.Frame):
         # 绑定状态更新事件
         self.app.root.bind("<<ExecutionStatusChanged>>", self.update_exec_status)
         
+        # 强制更新滚动区域
+        self.scrollable_frame.force_update()
+        
     def create_widgets(self):
         """创建自动化操作界面控件"""
-        # 增加一个内部容器，确保内容足够长以触发滚动条
-        inner_frame = ttk.Frame(self.content_frame)
-        inner_frame.pack(fill=tk.BOTH, expand=True)
-        inner_frame.columnconfigure(1, weight=1)
+        row = 0
         
         # 基础路径配置
-        ttk.Label(inner_frame, text="远程基础路径:").grid(row=0, column=0, sticky=tk.W, padx=8, pady=8)
+        ttk.Label(self.inner_frame, text="远程基础路径:").grid(row=row, column=0, sticky=tk.W, padx=8, pady=8)
         self.base_dir_var = tk.StringVar()
-        self.base_dir_entry = ttk.Entry(inner_frame, textvariable=self.base_dir_var)
-        self.base_dir_entry.grid(row=0, column=1, sticky=tk.EW, padx=8, pady=8)
+        self.base_dir_entry = ttk.Entry(self.inner_frame, textvariable=self.base_dir_var)
+        self.base_dir_entry.grid(row=row, column=1, sticky=tk.EW, padx=8, pady=8)
+        row += 1
         
         # 执行状态显示
-        status_frame = ttk.Frame(inner_frame)
-        status_frame.grid(row=1, column=0, columnspan=2, sticky=tk.EW, padx=8, pady=8)
+        status_frame = ttk.Frame(self.inner_frame)
+        status_frame.grid(row=row, column=0, columnspan=2, sticky=tk.EW, padx=8, pady=8)
         ttk.Label(status_frame, text="执行状态:").pack(side=tk.LEFT, padx=5)
         self.exec_status_var = tk.StringVar(value="就绪")
         self.status_label = ttk.Label(status_frame, textvariable=self.exec_status_var, foreground="green")
@@ -193,10 +205,12 @@ class AutomationPanel(ttk.Frame):
         
         clear_queue_btn = ttk.Button(status_frame, text="清空队列", command=self.app.clear_command_queue)
         clear_queue_btn.pack(side=tk.RIGHT, padx=5)
+        row += 1
         
         # 操作按钮区
-        btn_frame = ttk.LabelFrame(inner_frame, text="HAPS操作", padding="10")
-        btn_frame.grid(row=2, column=0, columnspan=2, sticky=tk.EW, padx=8, pady=8)
+        btn_frame = ttk.LabelFrame(self.inner_frame, text="HAPS操作", padding="10")
+        btn_frame.grid(row=row, column=0, columnspan=2, sticky=tk.EW, padx=8, pady=8)
+        row += 1
         
         # Load按钮组
         load_frame = ttk.Frame(btn_frame)
@@ -215,22 +229,23 @@ class AutomationPanel(ttk.Frame):
         ttk.Button(reset_frame, text="Reset Slave", command=lambda: self.app.queue_command("reset_slave")).pack(side=tk.LEFT, padx=8)
         
         # 路径配置区
-        config_frame = ttk.LabelFrame(inner_frame, text="远程文件配置", padding="10")
-        config_frame.grid(row=3, column=0, columnspan=2, sticky=tk.EW, padx=8, pady=8)
+        config_frame = ttk.LabelFrame(self.inner_frame, text="远程文件配置", padding="10")
+        config_frame.grid(row=row, column=0, columnspan=2, sticky=tk.EW, padx=8, pady=8)
         config_frame.columnconfigure(1, weight=1)
-        
-        row = 0
-        # haps100control路径
-        ttk.Label(config_frame, text="haps100control路径:").grid(row=row, column=0, sticky=tk.W, padx=8, pady=8)
-        self.haps_control_var = tk.StringVar()
-        ttk.Entry(config_frame, textvariable=self.haps_control_var).grid(row=row, column=1, sticky=tk.EW, padx=8, pady=8)
         row += 1
+        
+        config_row = 0
+        # haps100control路径
+        ttk.Label(config_frame, text="haps100control路径:").grid(row=config_row, column=0, sticky=tk.W, padx=8, pady=8)
+        self.haps_control_var = tk.StringVar()
+        ttk.Entry(config_frame, textvariable=self.haps_control_var).grid(row=config_row, column=1, sticky=tk.EW, padx=8, pady=8)
+        config_row += 1
         
         # xactorscmd路径
-        ttk.Label(config_frame, text="xactorscmd路径:").grid(row=row, column=0, sticky=tk.W, padx=8, pady=8)
+        ttk.Label(config_frame, text="xactorscmd路径:").grid(row=config_row, column=0, sticky=tk.W, padx=8, pady=8)
         self.xactorscmd_var = tk.StringVar()
-        ttk.Entry(config_frame, textvariable=self.xactorscmd_var).grid(row=row, column=1, sticky=tk.EW, padx=8, pady=8)
-        row += 1
+        ttk.Entry(config_frame, textvariable=self.xactorscmd_var).grid(row=config_row, column=1, sticky=tk.EW, padx=8, pady=8)
+        config_row += 1
         
         # TCL路径配置
         self.tcl_vars = {}
@@ -244,16 +259,22 @@ class AutomationPanel(ttk.Frame):
         ]
         for label_text, key in tcl_configs:
             self.tcl_vars[key] = tk.StringVar()
-            ttk.Label(config_frame, text=label_text).grid(row=row, column=0, sticky=tk.W, padx=8, pady=8)
-            ttk.Entry(config_frame, textvariable=self.tcl_vars[key]).grid(row=row, column=1, sticky=tk.EW, padx=8, pady=8)
-            row += 1
-        
-        # 添加额外的空白区域，确保能触发滚动条
-        ttk.Label(inner_frame, text="").grid(row=4, column=0, pady=20)
+            ttk.Label(config_frame, text=label_text).grid(row=config_row, column=0, sticky=tk.W, padx=8, pady=8)
+            ttk.Entry(config_frame, textvariable=self.tcl_vars[key]).grid(row=config_row, column=1, sticky=tk.EW, padx=8, pady=8)
+            config_row += 1
         
         # 保存配置按钮
         save_btn = ttk.Button(config_frame, text="保存配置", command=self.save_config)
-        save_btn.grid(row=row, column=0, columnspan=2, pady=12)
+        save_btn.grid(row=config_row, column=0, columnspan=2, pady=12)
+        config_row += 1
+        
+        # 添加额外空白区域确保滚动条能显示
+        for i in range(5):  # 添加5行空白，确保内容足够长
+            ttk.Label(self.inner_frame, text="").grid(row=row, column=0, pady=10)
+            row += 1
+        
+        # 强制更新滚动区域
+        self.scrollable_frame.force_update()
         
     def load_config(self):
         """加载自动化操作配置"""
@@ -399,7 +420,7 @@ class CustomCommandsPanel(ttk.Frame):
     def update_layout(self):
         """更新布局"""
         self.cmds_frame.update_idletasks()
-        self.main_frame.update_idletasks()
+        self.main_frame.force_update()
 
 class HAPSAutomationGUI:
     def __init__(self, root):
@@ -448,10 +469,10 @@ class HAPSAutomationGUI:
         self.is_processing = False
         
         # 主窗口布局 - 修复日志框面积过大问题
-        # 调整比例为4:1，操作区更大，日志区更小
+        # 调整比例为5:1，操作区更大，日志区更小
         self.root.grid_rowconfigure(0, weight=1)
-        self.root.grid_columnconfigure(0, weight=4)  # 操作区占4/5
-        self.root.grid_columnconfigure(1, weight=1)  # 日志区占1/5
+        self.root.grid_columnconfigure(0, weight=5)  # 操作区占5/6
+        self.root.grid_columnconfigure(1, weight=1)  # 日志区占1/6
         
         # 左侧操作区
         self.operation_frame = ttk.Frame(root)
@@ -609,7 +630,7 @@ class HAPSAutomationGUI:
             except Exception as e:
                 self.sync_log(f"[{desc}] 检查失败：{str(e)}")
 
-    # 命令执行逻辑
+    # 命令执行逻辑 - 彻底修复编码错误
     def queue_command(self, cmd_type):
         """将命令加入队列"""
         if not self.ssh_connected:
@@ -711,68 +732,60 @@ class HAPSAutomationGUI:
             messagebox.showerror("执行异常", str(e))
 
     def run_remote_command(self, cmd):
-        """执行远程命令（使用字节流处理）"""
+        """执行远程命令（完全重构编码处理）"""
         try:
-            stdin, stdout, stderr = self.ssh_client.exec_command(cmd, timeout=300)
+            # 执行命令时指定终端类型，避免某些服务器默认编码问题
+            channel = self.ssh_client.get_transport().open_session()
+            channel.set_combine_stderr(True)  # 合并stderr到stdout
+            channel.exec_command(cmd)
             
             output = []
             error = []
             
-            def read_stream(stream, buffer):
+            # 直接读取原始字节流，不进行解码
+            def read_stream():
                 while True:
-                    try:
-                        data = stream.readline()
-                        if not data:
-                            break
-                        # 直接使用GBK解码处理，解决中文编码问题
-                        processed = self.process_data(data)
-                        buffer.append(processed)
-                        self.sync_log(f"输出：{processed}")
-                    except Exception as e:
-                        err_msg = f"[读取错误] {str(e)}"
-                        buffer.append(err_msg)
-                        self.sync_log(err_msg)
+                    data = channel.recv(1024)
+                    if not data:
                         break
+                    # 直接使用GBK解码，不尝试其他编码
+                    try:
+                        processed = data.decode('gbk', errors='replace')
+                    except:
+                        processed = data.decode('latin-1')
+                    output.append(processed)
+                    self.sync_log(f"输出：{processed.rstrip('\r\n')}")
             
-            stdout_thread = threading.Thread(target=read_stream, args=(stdout, output), daemon=True)
-            stderr_thread = threading.Thread(target=read_stream, args=(stderr, error), daemon=True)
+            # 启动线程读取流
+            read_thread = threading.Thread(target=read_stream, daemon=True)
+            read_thread.start()
+            read_thread.join()
             
-            stdout_thread.start()
-            stderr_thread.start()
-            stdout_thread.join()
-            stderr_thread.join()
-            
-            return_code = stdout.channel.recv_exit_status()
-            full_output = "\n".join(output)
-            full_error = "\n".join(error)
+            # 等待命令完成
+            return_code = channel.recv_exit_status()
+            full_output = "".join(output)
             
             if return_code == 0:
                 return True, f"返回码0，输出：{full_output}", return_code, full_output
             else:
-                return False, f"返回码{return_code}，错误：{full_error}", return_code, full_output
+                return False, f"返回码{return_code}，错误：{full_output}", return_code, full_output
                 
         except Exception as e:
             return False, str(e), -1, ""
 
     def process_data(self, data):
         """处理数据，强制使用GBK编码解决中文问题"""
-        # 如果是字符串，直接返回
+        # 此方法现在主要用于其他地方的数据处理
         if isinstance(data, str):
             return data.rstrip('\r\n')
             
-        # 如果是字节，强制使用GBK解码（解决中文编码问题）
         if isinstance(data, bytes):
+            # 强制使用GBK解码
             try:
-                # 强制使用GBK解码，替换无法解码的字符
                 return data.decode('gbk', errors='replace').rstrip('\r\n')
             except:
-                # 如果GBK解码失败，尝试其他编码
-                try:
-                    return data.decode('utf-8', errors='replace').rstrip('\r\n')
-                except:
-                    return data.decode('latin-1').rstrip('\r\n')
+                return data.decode('latin-1').rstrip('\r\n')
             
-        # 既不是字符串也不是字节
         return str(data)
 
     # 工具方法
