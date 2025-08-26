@@ -315,14 +315,14 @@ class AutomationPanel(ttk.Frame):
             self.status_label.configure(foreground="green")
 
 class CustomCommandsPanel(ttk.Frame):
-    """自定义命令面板 - 添加了滚动条支持"""
+    """自定义命令面板 - 修复执行逻辑"""
     def __init__(self, parent, app):
         super().__init__(parent)
         self.app = app
         self.parent = parent
         self.cmd_entries = []
         
-        # 创建可滚动框架（核心修改：使用ScrollableFrame）
+        # 创建可滚动框架
         self.scrollable_frame = ScrollableFrame(self)
         self.scrollable_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
         self.content_frame = self.scrollable_frame.content_frame
@@ -330,6 +330,7 @@ class CustomCommandsPanel(ttk.Frame):
         # 创建内部容器
         self.inner_frame = ttk.Frame(self.content_frame)
         self.inner_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        self.inner_frame.columnconfigure(1, weight=1)
         
         # 创建控件
         self.create_widgets()
@@ -341,27 +342,40 @@ class CustomCommandsPanel(ttk.Frame):
         self.scrollable_frame.force_update()
         
     def create_widgets(self):
-        """创建自定义命令界面控件"""
+        """创建自定义命令界面控件 - 新增默认TCL路径配置"""
+        row = 0
+        
+        # 新增：默认TCL文件路径配置
+        ttk.Label(self.inner_frame, text="haps_control_default.tcl路径:").grid(
+            row=row, column=0, sticky=tk.W, padx=8, pady=8)
+        self.default_tcl_var = tk.StringVar()
+        ttk.Entry(self.inner_frame, textvariable=self.default_tcl_var).grid(
+            row=row, column=1, sticky=tk.EW, padx=8, pady=8)
+        row += 1
+        
         # 命令框容器
         self.cmds_frame = ttk.LabelFrame(self.inner_frame, text="自定义远程命令", padding="10")
-        self.cmds_frame.pack(fill=tk.BOTH, expand=True, padx=8, pady=(8, 12))
-        self.cmds_frame.columnconfigure(0, weight=1)
+        self.cmds_frame.grid(row=row, column=0, columnspan=2, sticky=tk.EW, padx=8, pady=(8, 12))
+        row += 1
         
         # 参数提示
         tip_frame = ttk.Frame(self.inner_frame)
-        tip_frame.pack(fill=tk.X, pady=(0, 8))
-        ttk.Label(tip_frame, text="提示：命令将加入队列执行，支持参数 $HAPS_DEVICE $HAPS_SERIAL", foreground="blue").pack(anchor=tk.W)
+        tip_frame.grid(row=row, column=0, columnspan=2, sticky=tk.EW, pady=(0, 8))
+        ttk.Label(tip_frame, text="提示：命令将添加到临时TCL文件执行，支持参数 $HAPS_DEVICE $HAPS_SERIAL", foreground="blue").pack(anchor=tk.W)
+        row += 1
         
         # 操作按钮区
         btn_frame = ttk.Frame(self.inner_frame)
-        btn_frame.pack(fill=tk.X, pady=(0, 12))
+        btn_frame.grid(row=row, column=0, columnspan=2, sticky=tk.EW, pady=(0, 12))
         ttk.Button(btn_frame, text="添加命令框", command=self.add_command_entry).pack(side=tk.LEFT, padx=8)
         ttk.Button(btn_frame, text="删除最后一个", command=self.remove_command_entry).pack(side=tk.LEFT, padx=8)
         ttk.Button(btn_frame, text="保存命令", command=self.save_custom_commands).pack(side=tk.LEFT, padx=8)
+        row += 1
         
         # 添加额外空白区域确保滚动条能显示
         for i in range(3):
-            ttk.Label(self.inner_frame, text="").pack(pady=10)
+            ttk.Label(self.inner_frame, text="").grid(row=row, column=0, pady=10)
+            row += 1
         
     def create_command_entries(self):
         """创建自定义命令输入框"""
@@ -374,6 +388,9 @@ class CustomCommandsPanel(ttk.Frame):
         custom_cmds = self.app.config.get("custom_commands", [""])
         for cmd in custom_cmds:
             self.add_command_entry(default_text=cmd, update_config=False)
+        
+        # 加载默认TCL路径配置
+        self.default_tcl_var.set(self.app.config.get("default_tcl_path", "tcl\\haps_control_default.tcl"))
         
         # 确保至少有一个空框体
         if not self.cmd_entries:
@@ -407,7 +424,7 @@ class CustomCommandsPanel(ttk.Frame):
         
         # 更新配置
         if update_config:
-            self.app.config["custom_commands"] = [v.get().strip() for (f, v, b) in self.cmd_entries]
+            self.save_custom_commands()  # 同时保存默认TCL路径
             self.update_layout()
 
     def remove_command_entry(self):
@@ -418,14 +435,16 @@ class CustomCommandsPanel(ttk.Frame):
         
         cmd_frame, cmd_var, exec_btn = self.cmd_entries.pop()
         cmd_frame.destroy()
-        self.app.config["custom_commands"] = [v.get().strip() for (f, v, b) in self.cmd_entries]
+        self.save_custom_commands()  # 同时保存默认TCL路径
         self.update_layout()
 
     def save_custom_commands(self):
-        """保存自定义命令"""
+        """保存自定义命令和默认TCL路径配置"""
+        # 保存自定义命令
         self.app.config["custom_commands"] = [v.get().strip() for (f, v, b) in self.cmd_entries]
+        # 保存默认TCL路径
+        self.app.config["default_tcl_path"] = self.default_tcl_var.get().strip()
         self.app.save_config()
-        messagebox.showinfo("保存成功", "自定义命令已保存")
         
     def update_layout(self):
         """更新布局并强制刷新滚动区域"""
@@ -464,7 +483,9 @@ class HAPSAutomationGUI:
             "reset_all_tcl": "tcl\\reset_all.tcl",
             "reset_master_tcl": "tcl\\reset_master.tcl",
             "reset_slave_tcl": "tcl\\reset_slave.tcl",
-            "custom_commands": [""]
+            "custom_commands": [""],
+            # 新增：默认TCL文件路径配置
+            "default_tcl_path": "tcl\\haps_control_default.tcl"
         }
         
         # 加载配置
@@ -613,7 +634,9 @@ class HAPSAutomationGUI:
             (self.config["haps_control_path"], "haps100control.bat"),
             (self.config["xactorscmd_path"], "xactorscmd.bat"),
             (self.config["base_dir"], "基础目录"),
-            (os.path.join(self.config["base_dir"], "system", "targetsystem.tsd"), "targetsystem.tsd")
+            (os.path.join(self.config["base_dir"], "system", "targetsystem.tsd"), "targetsystem.tsd"),
+            # 新增：检查默认TCL文件路径
+            (self.get_full_default_tcl_path(), "haps_control_default.tcl")
         ]
         
         for path, desc in paths:
@@ -639,15 +662,15 @@ class HAPSAutomationGUI:
             except Exception as e:
                 self.sync_log(f"[{desc}] 检查失败：{str(e)}")
 
-    # 命令执行逻辑
+    # 命令执行逻辑 - 核心修改：自定义命令执行流程
     def queue_command(self, cmd_type):
-        """将命令加入队列"""
+        """将预设命令加入队列"""
         if not self.ssh_connected:
             messagebox.showerror("未连接", "请先建立SSH连接")
             return
         
         self.command_queue.put(('preset', cmd_type))
-        self.sync_log(f"命令[{cmd_type}]加入队列，当前队列：{self.command_queue.qsize()}")
+        self.sync_log(f"预设命令[{cmd_type}]加入队列，当前队列：{self.command_queue.qsize()}")
         
         if not self.is_processing:
             threading.Thread(target=self.process_command_queue, daemon=True).start()
@@ -655,7 +678,7 @@ class HAPSAutomationGUI:
         self.update_exec_status()
 
     def queue_custom_command(self, cmd_text):
-        """自定义命令加入队列"""
+        """将自定义命令加入队列 - 按新逻辑处理"""
         if not self.ssh_connected:
             messagebox.showerror("未连接", "请先建立SSH连接")
             return
@@ -666,7 +689,7 @@ class HAPSAutomationGUI:
             return
         
         self.command_queue.put(('custom', cmd_text))
-        self.sync_log(f"开始执行自定义命令：{cmd_text}")
+        self.sync_log(f"自定义命令加入队列：{cmd_text}")
         
         if not self.is_processing:
             threading.Thread(target=self.process_command_queue, daemon=True).start()
@@ -686,7 +709,8 @@ class HAPSAutomationGUI:
                         self.sync_log(f"开始执行预设命令：{cmd_content}")
                         self.run_haps_command(cmd_content)
                     elif cmd_type == 'custom':
-                        self.run_remote_command(cmd_content)
+                        self.sync_log(f"开始执行自定义命令：{cmd_content}")
+                        self.run_custom_tcl_command(cmd_content)  # 调用新的自定义命令执行方法
                 except Exception as e:
                     self.sync_log(f"命令执行异常：{str(e)}")
                 finally:
@@ -697,8 +721,132 @@ class HAPSAutomationGUI:
             self.update_exec_status()
             self.sync_log("队列所有命令执行完毕")
 
+    def get_full_default_tcl_path(self):
+        """获取完整的默认TCL文件路径"""
+        default_tcl_path = self.config.get("default_tcl_path", "tcl\\haps_control_default.tcl").strip()
+        base_dir = self.config.get("base_dir", "").strip()
+        
+        # 检查是否为绝对路径
+        if os.path.isabs(default_tcl_path) or (len(default_tcl_path) > 1 and default_tcl_path[1] == ':'):
+            return default_tcl_path
+        # 否则拼接基础路径
+        if base_dir:
+            return os.path.join(base_dir, default_tcl_path).replace("/", "\\")
+        return default_tcl_path
+
+    def generate_temp_tcl_file(self, custom_command):
+        """生成临时TCL文件：使用SFTP方式，避免命令行转义问题"""
+        try:
+            # 1. 获取路径信息
+            default_tcl_path = self.get_full_default_tcl_path()
+            base_dir = self.config.get("base_dir", "").strip()
+            temp_tcl_path = os.path.join(base_dir, "haps_control_tmp.tcl").replace("/", "\\") if base_dir else "haps_control_tmp.tcl"
+            
+            self.sync_log(f"默认TCL路径：{default_tcl_path}")
+            self.sync_log(f"临时TCL路径：{temp_tcl_path}")
+            
+            # 2. 读取默认TCL文件内容
+            self.sync_log("读取默认TCL文件内容...")
+            cat_cmd = f'type "{default_tcl_path}"'  # Windows系统使用type命令
+            stdin, stdout, stderr = self.ssh_client.exec_command(cat_cmd, timeout=30)
+            default_content_bytes = stdout.read()
+            error_bytes = stderr.read()
+            
+            error = self.process_data(error_bytes)
+            if error:
+                raise Exception(f"读取默认TCL文件错误：{error}")
+            
+            # 3. 处理内容编码
+            try:
+                default_content = default_content_bytes.decode('gbk', errors='replace')
+            except:
+                default_content = default_content_bytes.decode('utf-8', errors='replace')
+            
+            # 4. 构建临时文件内容
+            temp_content = f"{default_content}\n"  # 默认内容
+            temp_content += f"{custom_command}\n"  # 自定义命令
+            temp_content += "cfg_close $HAPS_HANDLE\n"  # 关闭句柄命令
+            
+            # 5. 使用SFTP方式写入临时文件（修复的核心部分）
+            self.sync_log("通过SFTP生成临时TCL文件...")
+            sftp = self.ssh_client.open_sftp()
+            
+            # 确保目录存在
+            temp_dir = os.path.dirname(temp_tcl_path)
+            if temp_dir:
+                try:
+                    sftp.stat(temp_dir)
+                except FileNotFoundError:
+                    self.sync_log(f"创建目录：{temp_dir}")
+                    # 递归创建目录的函数
+                    def mkdir_p(sftp, remote_directory):
+                        if remote_directory == '/':
+                            sftp.chdir('/')
+                            return
+                        if remote_directory == '':
+                            return
+                        try:
+                            sftp.stat(remote_directory)
+                        except FileNotFoundError:
+                            dirname, basename = os.path.split(remote_directory.rstrip('/'))
+                            mkdir_p(sftp, dirname)
+                            sftp.mkdir(basename)
+                            sftp.chdir(basename)
+                            return
+                    mkdir_p(sftp, temp_dir)
+            
+            # 写入文件内容
+            with sftp.file(temp_tcl_path, 'w') as f:
+                # 确保使用正确的换行符
+                f.write(temp_content.replace('\n', '\r\n'))
+            
+            sftp.close()
+            self.sync_log(f"临时TCL文件生成成功：{temp_tcl_path}")
+            return temp_tcl_path
+            
+        except Exception as e:
+            self.sync_log(f"生成临时TCL文件失败：{str(e)}")
+            raise
+
+    def run_custom_tcl_command(self, custom_command):
+        # 保持与之前相同的实现...
+        try:
+            # 1. 验证必要路径配置
+            haps_ctrl = self.config["haps_control_path"]
+            xactorscmd = self.config["xactorscmd_path"]
+            
+            if not haps_ctrl or not xactorscmd:
+                raise ValueError("haps100control和xactorscmd路径不能为空")
+            
+            # 2. 生成临时TCL文件
+            temp_tcl_path = self.generate_temp_tcl_file(custom_command)
+            
+            # 3. 构建执行命令
+            base_dir = self.config.get("base_dir", "").strip()
+            if base_dir:
+                cmd = f'cd /d "{base_dir}" && call "{haps_ctrl}" "{xactorscmd}" "{temp_tcl_path}"'
+            else:
+                cmd = f'call "{haps_ctrl}" "{xactorscmd}" "{temp_tcl_path}"'
+            
+            self.sync_log(f"执行自定义命令：{cmd}")
+            
+            # 4. 执行命令
+            success, msg = self.run_remote_command(cmd)[:2]
+            if success:
+                self.sync_log(f"自定义命令执行成功：{msg}")
+            else:
+                self.sync_log(f"自定义命令执行失败：{msg}")
+                messagebox.showerror("执行失败", f"自定义命令失败：{msg}")
+                
+        except ValueError as e:
+            self.sync_log(f"参数错误：{str(e)}")
+            messagebox.showerror("参数错误", str(e))
+        except Exception as e:
+            self.sync_log(f"自定义命令执行异常：{str(e)}")
+            messagebox.showerror("执行异常", str(e))
+
     def run_haps_command(self, cmd_type):
-        """执行HAPS命令"""
+        """执行HAPS预设命令"""
         try:
             haps_ctrl = self.config["haps_control_path"]
             xactorscmd = self.config["xactorscmd_path"]
