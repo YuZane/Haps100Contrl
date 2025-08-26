@@ -9,45 +9,42 @@ import paramiko
 from paramiko.ssh_exception import SSHException, AuthenticationException
 
 class ScrollableFrame(ttk.Frame):
-    """可滚动框架组件"""
+    """可滚动框架组件 - 修复滚动条不显示问题"""
     def __init__(self, container, *args, **kwargs):
         super().__init__(container, *args, **kwargs)
         
+        # 创建画布和滚动条
         self.canvas = tk.Canvas(self, highlightthickness=0)
         self.scrollbar = ttk.Scrollbar(self, orient="vertical", command=self.canvas.yview)
         self.content_frame = ttk.Frame(self.canvas)
         
-        self.content_frame.bind("<Configure>", self._on_content_configure)
+        # 绑定事件
+        self.content_frame.bind(
+            "<Configure>",
+            lambda e: self.canvas.configure(scrollregion=self.canvas.bbox("all"))
+        )
+        
+        # 创建窗口
         self.canvas_frame = self.canvas.create_window((0, 0), window=self.content_frame, anchor="nw")
+        
+        # 配置画布
+        self.canvas.configure(yscrollcommand=self.scrollbar.set)
         self.canvas.bind("<Configure>", self._on_canvas_configure)
         self.canvas.bind_all("<MouseWheel>", self._on_mousewheel)
-        self.canvas.configure(yscrollcommand=self.scrollbar.set)
         
+        # 布局
         self.canvas.pack(side="left", fill="both", expand=True)
         self.scrollbar.pack(side="right", fill="y")
         
-        self._resize_timer = None
-        self._needs_update = False
-        
-    def _on_content_configure(self, event):
-        if not self._needs_update:
-            self._needs_update = True
-            self.after(100, self._update_scrollregion)
-    
+        # 强制更新布局
+        self.update_idletasks()
+
     def _on_canvas_configure(self, event):
-        if not self._needs_update:
-            self._needs_update = True
-            self.after(100, lambda: self._update_canvas_width(event.width))
-        
-    def _update_scrollregion(self):
-        self.canvas.configure(scrollregion=self.canvas.bbox("all"))
-        self._needs_update = False
-        
-    def _update_canvas_width(self, width):
-        self.canvas.itemconfig(self.canvas_frame, width=width)
-        self._needs_update = False
+        """当画布大小变化时调整内容宽度"""
+        self.canvas.itemconfig(self.canvas_frame, width=event.width)
         
     def _on_mousewheel(self, event):
+        """鼠标滚轮事件处理"""
         self.canvas.yview_scroll(int(-1*(event.delta/120)), "units")
 
 class SSHConfigPanel(ttk.Frame):
@@ -149,7 +146,7 @@ class SSHConfigPanel(ttk.Frame):
             self.ssh_btn.configure(text="连接")
 
 class AutomationPanel(ttk.Frame):
-    """自动化操作面板"""
+    """自动化操作面板 - 修复滚动条问题"""
     def __init__(self, parent, app):
         super().__init__(parent)
         self.app = app
@@ -159,6 +156,8 @@ class AutomationPanel(ttk.Frame):
         self.main_frame = ScrollableFrame(self)
         self.main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
         self.content_frame = self.main_frame.content_frame
+        
+        # 关键修复：确保内容框架正确填充和扩展
         self.content_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
         self.content_frame.columnconfigure(1, weight=1)
         
@@ -173,14 +172,19 @@ class AutomationPanel(ttk.Frame):
         
     def create_widgets(self):
         """创建自动化操作界面控件"""
+        # 增加一个内部容器，确保内容足够长以触发滚动条
+        inner_frame = ttk.Frame(self.content_frame)
+        inner_frame.pack(fill=tk.BOTH, expand=True)
+        inner_frame.columnconfigure(1, weight=1)
+        
         # 基础路径配置
-        ttk.Label(self.content_frame, text="远程基础路径:").grid(row=0, column=0, sticky=tk.W, padx=8, pady=8)
+        ttk.Label(inner_frame, text="远程基础路径:").grid(row=0, column=0, sticky=tk.W, padx=8, pady=8)
         self.base_dir_var = tk.StringVar()
-        self.base_dir_entry = ttk.Entry(self.content_frame, textvariable=self.base_dir_var)
+        self.base_dir_entry = ttk.Entry(inner_frame, textvariable=self.base_dir_var)
         self.base_dir_entry.grid(row=0, column=1, sticky=tk.EW, padx=8, pady=8)
         
         # 执行状态显示
-        status_frame = ttk.Frame(self.content_frame)
+        status_frame = ttk.Frame(inner_frame)
         status_frame.grid(row=1, column=0, columnspan=2, sticky=tk.EW, padx=8, pady=8)
         ttk.Label(status_frame, text="执行状态:").pack(side=tk.LEFT, padx=5)
         self.exec_status_var = tk.StringVar(value="就绪")
@@ -191,7 +195,7 @@ class AutomationPanel(ttk.Frame):
         clear_queue_btn.pack(side=tk.RIGHT, padx=5)
         
         # 操作按钮区
-        btn_frame = ttk.LabelFrame(self.content_frame, text="HAPS操作", padding="10")
+        btn_frame = ttk.LabelFrame(inner_frame, text="HAPS操作", padding="10")
         btn_frame.grid(row=2, column=0, columnspan=2, sticky=tk.EW, padx=8, pady=8)
         
         # Load按钮组
@@ -211,7 +215,7 @@ class AutomationPanel(ttk.Frame):
         ttk.Button(reset_frame, text="Reset Slave", command=lambda: self.app.queue_command("reset_slave")).pack(side=tk.LEFT, padx=8)
         
         # 路径配置区
-        config_frame = ttk.LabelFrame(self.content_frame, text="远程文件配置", padding="10")
+        config_frame = ttk.LabelFrame(inner_frame, text="远程文件配置", padding="10")
         config_frame.grid(row=3, column=0, columnspan=2, sticky=tk.EW, padx=8, pady=8)
         config_frame.columnconfigure(1, weight=1)
         
@@ -243,6 +247,9 @@ class AutomationPanel(ttk.Frame):
             ttk.Label(config_frame, text=label_text).grid(row=row, column=0, sticky=tk.W, padx=8, pady=8)
             ttk.Entry(config_frame, textvariable=self.tcl_vars[key]).grid(row=row, column=1, sticky=tk.EW, padx=8, pady=8)
             row += 1
+        
+        # 添加额外的空白区域，确保能触发滚动条
+        ttk.Label(inner_frame, text="").grid(row=4, column=0, pady=20)
         
         # 保存配置按钮
         save_btn = ttk.Button(config_frame, text="保存配置", command=self.save_config)
@@ -392,7 +399,7 @@ class CustomCommandsPanel(ttk.Frame):
     def update_layout(self):
         """更新布局"""
         self.cmds_frame.update_idletasks()
-        self.main_frame._update_scrollregion()
+        self.main_frame.update_idletasks()
 
 class HAPSAutomationGUI:
     def __init__(self, root):
@@ -401,24 +408,17 @@ class HAPSAutomationGUI:
         self.root.geometry("1200x600")
         self.root.minsize(1000, 500)
         
-        # ------------------------------ 1. 先初始化日志相关属性（关键修复）------------------------------
-        # 日志更新节流控制
+        # 先初始化日志相关属性
         self._log_update_timer = None
         self._pending_logs = []
         self._log_updating = False
-        
-        # 用于临时冻结界面更新（在sync_log前初始化）
         self._freeze_ui = False
         
-        # ------------------------------ 2. 初始化配置相关属性 ------------------------------
-        # 配置文件路径
+        # 配置相关初始化
         self.config_file = "haps_config.json"
-        
-        # 默认路径配置
         self.default_haps_control = "C:\\Synopsys\\protocomp-rtV-2024.09\\bin\\haps100control.bat"
         self.default_xactorscmd = "C:\\Synopsys\\protocomp-rtV-2024.09\\bin\\xactorscmd.bat"
         
-        # 初始化配置
         self.config = {
             "ssh_host": "192.168.1.1",
             "ssh_port": 22,
@@ -436,10 +436,9 @@ class HAPSAutomationGUI:
             "custom_commands": [""]
         }
         
-        # 加载配置文件（现在调用sync_log时，_freeze_ui已存在）
+        # 加载配置
         self.load_config()
         
-        # ------------------------------ 3. 初始化其他属性 ------------------------------
         # SSH连接状态
         self.ssh_client = None
         self.ssh_connected = False
@@ -448,39 +447,31 @@ class HAPSAutomationGUI:
         self.command_queue = Queue()
         self.is_processing = False
         
-        # 日志更新节流控制
-        self._log_update_timer = None
-        self._pending_logs = []
-        self._log_updating = False
-        
-        # 用于临时冻结界面更新
-        self._freeze_ui = False
-        
-        # ------------------------------ 界面布局（在配置初始化之后）------------------------------
-        # 主窗口分为左右两部分：左侧操作区，右侧日志区
+        # 主窗口布局 - 修复日志框面积过大问题
+        # 调整比例为4:1，操作区更大，日志区更小
         self.root.grid_rowconfigure(0, weight=1)
-        self.root.grid_columnconfigure(0, weight=3)  # 操作区占3/5宽度
-        self.root.grid_columnconfigure(1, weight=2)  # 日志区占2/5宽度
+        self.root.grid_columnconfigure(0, weight=4)  # 操作区占4/5
+        self.root.grid_columnconfigure(1, weight=1)  # 日志区占1/5
         
         # 左侧操作区
         self.operation_frame = ttk.Frame(root)
         self.operation_frame.grid(row=0, column=0, sticky=tk.NSEW, padx=(10, 5), pady=10)
         
-        # 创建标签页控件
+        # 标签页控件
         self.notebook = ttk.Notebook(self.operation_frame)
         self.notebook.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
         
-        # 创建三个功能面板（现在config已经初始化完成）
+        # 创建三个功能面板
         self.ssh_panel = SSHConfigPanel(self.notebook, self)
         self.automation_panel = AutomationPanel(self.notebook, self)
         self.custom_commands_panel = CustomCommandsPanel(self.notebook, self)
         
-        # 将面板添加到标签页
+        # 添加到标签页
         self.notebook.add(self.ssh_panel, text="SSH配置")
         self.notebook.add(self.automation_panel, text="自动化操作")
         self.notebook.add(self.custom_commands_panel, text="自定义命令")
         
-        # ------------------------------ 右侧日志区 ------------------------------
+        # 右侧日志区
         self.log_frame = ttk.LabelFrame(root, text="执行日志", padding="12")
         self.log_frame.grid(row=0, column=1, sticky=tk.NSEW, padx=(5, 10), pady=10)
         self.log_frame.grid_rowconfigure(1, weight=1)
@@ -505,14 +496,14 @@ class HAPSAutomationGUI:
         )
         self.log_text.grid(row=1, column=0, sticky=tk.NSEW, pady=(0, 5))
         
-        # 底部状态栏 - 显示SSH连接状态
+        # 底部状态栏
         self.status_bar = ttk.Label(root, text="SSH未连接", relief=tk.SUNKEN, anchor=tk.W)
         self.status_bar.grid(row=1, column=0, columnspan=2, sticky=tk.EW, padx=10, pady=(0, 5))
         
         # 窗口关闭事件
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
 
-    # ------------------------------ SSH连接逻辑 ------------------------------
+    # SSH连接逻辑
     def connect_ssh(self):
         try:
             host = self.config["ssh_host"]
@@ -544,7 +535,6 @@ class HAPSAutomationGUI:
             output_bytes = stdout.read()
             error_bytes = stderr.read()
             
-            # 处理输出
             output = self.process_data(output_bytes)
             error = self.process_data(error_bytes)
             
@@ -572,7 +562,6 @@ class HAPSAutomationGUI:
             if not self.ssh_connected:
                 self.ssh_client = None
                 
-            # 触发SSH状态更新事件
             self.root.event_generate("<<SSHStatusChanged>>", when="tail")
 
     def disconnect_ssh(self):
@@ -586,8 +575,6 @@ class HAPSAutomationGUI:
         self.ssh_connected = False
         self.status_bar.config(text="SSH未连接")
         self.ssh_client = None
-        
-        # 触发SSH状态更新事件
         self.root.event_generate("<<SSHStatusChanged>>", when="tail")
 
     def check_remote_paths(self):
@@ -602,7 +589,6 @@ class HAPSAutomationGUI:
         for path, desc in paths:
             if not path:
                 continue
-            # 处理路径中的反斜杠问题
             path = path.replace("/", "\\")
             cmd = f'if exist "{path}" (echo EXIST) else (echo NOT_EXIST)'
             try:
@@ -610,13 +596,12 @@ class HAPSAutomationGUI:
                 output_bytes = stdout.read()
                 error_bytes = stderr.read()
                 
-                # 处理输出数据
                 output = self.process_data(output_bytes)
                 error = self.process_data(error_bytes)
                 
                 if error:
                     self.sync_log(f"[{desc}] 检查错误：{error}")
-                elif output == "EXIST" or "4558495354" in output:  # EXIST的十六进制
+                elif output == "EXIST" or "4558495354" in output:
                     self.sync_log(f"[{desc}] 路径存在：{path}")
                 else:
                     self.sync_log(f"[{desc}] 路径不存在：{path}")
@@ -624,7 +609,7 @@ class HAPSAutomationGUI:
             except Exception as e:
                 self.sync_log(f"[{desc}] 检查失败：{str(e)}")
 
-    # ------------------------------ 命令执行逻辑 ------------------------------
+    # 命令执行逻辑
     def queue_command(self, cmd_type):
         """将命令加入队列"""
         if not self.ssh_connected:
@@ -651,7 +636,7 @@ class HAPSAutomationGUI:
             return
         
         self.command_queue.put(('custom', cmd_text))
-        self.sync_log(f"自定义命令加入队列，当前队列：{self.command_queue.qsize()}")
+        self.sync_log(f"开始执行自定义命令：{cmd_text}")
         
         if not self.is_processing:
             threading.Thread(target=self.process_command_queue, daemon=True).start()
@@ -671,7 +656,6 @@ class HAPSAutomationGUI:
                         self.sync_log(f"开始执行预设命令：{cmd_content}")
                         self.run_haps_command(cmd_content)
                     elif cmd_type == 'custom':
-                        self.sync_log(f"开始执行自定义命令：{cmd_content}")
                         self.run_remote_command(cmd_content)
                 except Exception as e:
                     self.sync_log(f"命令执行异常：{str(e)}")
@@ -686,7 +670,6 @@ class HAPSAutomationGUI:
     def run_haps_command(self, cmd_type):
         """执行HAPS命令"""
         try:
-            # 获取路径参数
             haps_ctrl = self.config["haps_control_path"]
             xactorscmd = self.config["xactorscmd_path"]
             base_dir = self.config["base_dir"]
@@ -694,7 +677,6 @@ class HAPSAutomationGUI:
             if not haps_ctrl or not xactorscmd:
                 raise ValueError("haps100control和xactorscmd路径不能为空")
             
-            # 获取TCL脚本路径
             tcl_map = {
                 "load_all": self.config["load_all_tcl"],
                 "load_master": self.config["load_master_tcl"],
@@ -705,18 +687,15 @@ class HAPSAutomationGUI:
             }
             tcl_script = tcl_map[cmd_type]
             
-            # 处理TCL路径
             if tcl_script and not tcl_script.startswith(('C:', 'D:', '\\', '/')) and base_dir:
                 tcl_script = f"{base_dir}\\{tcl_script}"
             
             if not tcl_script:
                 raise ValueError(f"未配置{cmd_type}的TCL脚本路径")
             
-            # 构建命令 - 先切换到基础目录再执行
             cmd = f'cd /d "{base_dir}" && call "{haps_ctrl}" "{xactorscmd}" "{tcl_script}"'
             self.sync_log(f"构建HAPS命令：{cmd}")
             
-            # 执行命令
             success, msg = self.run_remote_command(cmd)[:2]
             if success:
                 self.sync_log(f"预设命令[{cmd_type}]执行成功：{msg}")
@@ -734,21 +713,18 @@ class HAPSAutomationGUI:
     def run_remote_command(self, cmd):
         """执行远程命令（使用字节流处理）"""
         try:
-            # 执行命令
             stdin, stdout, stderr = self.ssh_client.exec_command(cmd, timeout=300)
             
-            # 实时读取输出（使用字节流）
             output = []
             error = []
             
             def read_stream(stream, buffer):
                 while True:
                     try:
-                        # 读取字节数据
                         data = stream.readline()
                         if not data:
                             break
-                        # 处理数据（可能是字节或字符串）
+                        # 直接使用GBK解码处理，解决中文编码问题
                         processed = self.process_data(data)
                         buffer.append(processed)
                         self.sync_log(f"输出：{processed}")
@@ -758,7 +734,6 @@ class HAPSAutomationGUI:
                         self.sync_log(err_msg)
                         break
             
-            # 启动线程读取stdout和stderr
             stdout_thread = threading.Thread(target=read_stream, args=(stdout, output), daemon=True)
             stderr_thread = threading.Thread(target=read_stream, args=(stderr, error), daemon=True)
             
@@ -767,7 +742,6 @@ class HAPSAutomationGUI:
             stdout_thread.join()
             stderr_thread.join()
             
-            # 获取返回码
             return_code = stdout.channel.recv_exit_status()
             full_output = "\n".join(output)
             full_error = "\n".join(error)
@@ -781,34 +755,29 @@ class HAPSAutomationGUI:
             return False, str(e), -1, ""
 
     def process_data(self, data):
-        """处理数据，优先GBK编码，确保兼容中文特殊字符"""
+        """处理数据，强制使用GBK编码解决中文问题"""
         # 如果是字符串，直接返回
         if isinstance(data, str):
             return data.rstrip('\r\n')
             
-        # 如果是字节，尝试解码
+        # 如果是字节，强制使用GBK解码（解决中文编码问题）
         if isinstance(data, bytes):
-            # 先尝试GBK解码（专门处理中文环境的特殊字符）
             try:
+                # 强制使用GBK解码，替换无法解码的字符
                 return data.decode('gbk', errors='replace').rstrip('\r\n')
-            except LookupError:  # 当系统不支持GBK编码时
-                pass
-                
-            # 尝试UTF-8解码
-            try:
-                return data.decode('utf-8', errors='replace').rstrip('\r\n')
-            except LookupError:
-                pass
-                
-            # 最后尝试Latin-1解码
-            return data.decode('latin-1').rstrip('\r\n')
+            except:
+                # 如果GBK解码失败，尝试其他编码
+                try:
+                    return data.decode('utf-8', errors='replace').rstrip('\r\n')
+                except:
+                    return data.decode('latin-1').rstrip('\r\n')
             
         # 既不是字符串也不是字节
         return str(data)
 
-    # ------------------------------ 工具方法 ------------------------------
+    # 工具方法
     def sync_log(self, message):
-        """同步更新日志（带节流控制）"""
+        """同步更新日志"""
         if self._freeze_ui:
             return
             
@@ -850,7 +819,6 @@ class HAPSAutomationGUI:
             self.log_text.delete(1.0, tk.END)
             self.log_text.config(state=tk.DISABLED)
             
-            # 添加日志清空消息
             self.log_text.config(state=tk.NORMAL)
             timestamp = time.strftime("%H:%M:%S")
             self.log_text.insert(tk.END, f"[{timestamp}] 日志已清空\n")
@@ -895,7 +863,6 @@ class HAPSAutomationGUI:
 
     def update_exec_status(self):
         """更新执行状态"""
-        # 触发执行状态更新事件
         self.root.event_generate("<<ExecutionStatusChanged>>", when="tail")
 
     def clear_command_queue(self):
@@ -918,16 +885,11 @@ class HAPSAutomationGUI:
             
     def on_close(self):
         """关闭主窗口时的处理"""
-        # 断开SSH连接
         if self.ssh_connected:
             self.disconnect_ssh()
-            
-        # 关闭主窗口
         self.root.destroy()
 
-# ------------------------------ 程序入口 ------------------------------
 if __name__ == "__main__":
     root = tk.Tk()
     app = HAPSAutomationGUI(root)
     root.mainloop()
-    
