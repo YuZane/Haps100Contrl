@@ -1,5 +1,5 @@
 import tkinter as tk
-from tkinter import ttk, scrolledtext, messagebox
+from tkinter import ttk, scrolledtext, messagebox, filedialog
 import os
 import json
 import threading
@@ -57,8 +57,170 @@ class ScrollableFrame(ttk.Frame):
         self.update_idletasks()
         self.canvas.configure(scrollregion=self.canvas.bbox("all"))
 
+class RemoteFileBrowser(tk.Toplevel):
+    """远程文件浏览器对话框"""
+    def __init__(self, parent, ssh_client, initial_dir="/"):
+        super().__init__(parent)
+        self.parent = parent
+        self.ssh_client = ssh_client
+        self.current_dir = initial_dir
+        self.selected_path = None
+        
+        self.title("浏览远程文件")
+        self.geometry("600x400")
+        self.minsize(500, 300)
+        
+        # 创建UI
+        self.create_widgets()
+        
+        # 加载初始目录
+        self.load_directory_contents()
+        
+        # 模态窗口
+        self.transient(parent)
+        self.grab_set()
+        self.wait_window(self)
+    
+    def create_widgets(self):
+        # 路径显示
+        path_frame = ttk.Frame(self)
+        path_frame.pack(fill=tk.X, padx=10, pady=5)
+        
+        ttk.Label(path_frame, text="当前路径:").pack(side=tk.LEFT, padx=5)
+        self.path_var = tk.StringVar()
+        ttk.Label(path_frame, textvariable=self.path_var, foreground="blue").pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
+        
+        # 文件列表
+        list_frame = ttk.Frame(self)
+        list_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+        
+        # 列表视图
+        columns = ("name", "type")
+        self.file_tree = ttk.Treeview(list_frame, columns=columns, show="headings")
+        self.file_tree.heading("name", text="名称")
+        self.file_tree.heading("type", text="类型")
+        self.file_tree.column("name", width=300)
+        self.file_tree.column("type", width=100)
+        
+        # 滚动条
+        scrollbar = ttk.Scrollbar(list_frame, orient="vertical", command=self.file_tree.yview)
+        self.file_tree.configure(yscrollcommand=scrollbar.set)
+        
+        self.file_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        # 绑定双击事件
+        self.file_tree.bind("<Double-1>", self.on_item_double_click)
+        
+        # 按钮区
+        btn_frame = ttk.Frame(self)
+        btn_frame.pack(fill=tk.X, padx=10, pady=10)
+        
+        ttk.Button(btn_frame, text="选择", command=self.on_select).pack(side=tk.RIGHT, padx=5)
+        ttk.Button(btn_frame, text="取消", command=self.on_cancel).pack(side=tk.RIGHT, padx=5)
+    
+    def load_directory_contents(self):
+        """加载目录内容"""
+        # 清空现有内容
+        for item in self.file_tree.get_children():
+            self.file_tree.delete(item)
+        
+        self.path_var.set(self.current_dir)
+        
+        try:
+            # 执行ls命令获取目录内容
+            cmd = f'dir /b /ad "{self.current_dir}"'  # 列出目录
+            stdin, stdout, stderr = self.ssh_client.exec_command(cmd, timeout=10)
+            dirs_bytes = stdout.read()
+            error_bytes = stderr.read()
+            
+            error = self.process_data(error_bytes)
+            if error:
+                raise Exception(f"读取目录错误：{error}")
+            
+            # 处理目录
+            dirs = self.process_data(dirs_bytes).split('\r\n')
+            dirs = [d for d in dirs if d.strip()]
+            
+            for dir_name in dirs:
+                self.file_tree.insert("", tk.END, values=(dir_name, "目录"))
+            
+            # 列出文件
+            cmd = f'dir /b /a-d "{self.current_dir}"'  # 列出文件
+            stdin, stdout, stderr = self.ssh_client.exec_command(cmd, timeout=10)
+            files_bytes = stdout.read()
+            error_bytes = stderr.read()
+            
+            error = self.process_data(error_bytes)
+            if error:
+                raise Exception(f"读取文件错误：{error}")
+            
+            # 处理文件
+            files = self.process_data(files_bytes).split('\r\n')
+            files = [f for f in files if f.strip()]
+            
+            for file_name in files:
+                self.file_tree.insert("", tk.END, values=(file_name, "文件"))
+                
+        except Exception as e:
+            messagebox.showerror("错误", f"加载目录失败：{str(e)}")
+    
+    def on_item_double_click(self, event):
+        """双击项目处理"""
+        selection = self.file_tree.selection()
+        if not selection:
+            return
+            
+        item = selection[0]
+        item_name = self.file_tree.item(item, "values")[0]
+        item_type = self.file_tree.item(item, "values")[1]
+        
+        if item_type == "目录":
+            # 进入子目录
+            if self.current_dir.endswith('\\'):
+                new_dir = f"{self.current_dir}{item_name}"
+            else:
+                new_dir = f"{self.current_dir}\\{item_name}"
+            self.current_dir = new_dir
+            self.load_directory_contents()
+    
+    def on_select(self):
+        """选择文件"""
+        selection = self.file_tree.selection()
+        if not selection:
+            messagebox.showinfo("提示", "请选择一个文件或目录")
+            return
+            
+        item = selection[0]
+        item_name = self.file_tree.item(item, "values")[0]
+        
+        if self.current_dir.endswith('\\'):
+            self.selected_path = f"{self.current_dir}{item_name}"
+        else:
+            self.selected_path = f"{self.current_dir}\\{item_name}"
+            
+        self.destroy()
+    
+    def on_cancel(self):
+        """取消选择"""
+        self.selected_path = None
+        self.destroy()
+    
+    def process_data(self, data):
+        """处理数据编码"""
+        if isinstance(data, str):
+            return data
+            
+        if isinstance(data, bytes):
+            try:
+                return data.decode('gbk', errors='replace')
+            except:
+                return data.decode('utf-8', errors='replace')
+            
+        return str(data)
+
 class SSHConfigPanel(ttk.Frame):
-    """SSH配置面板"""
+    """SSH配置面板 - 新增模式切换"""
     def __init__(self, parent, app):
         super().__init__(parent)
         self.app = app
@@ -79,30 +241,55 @@ class SSHConfigPanel(ttk.Frame):
         
         # 绑定连接状态更新事件
         self.app.root.bind("<<SSHStatusChanged>>", self.update_ssh_status)
+        self.app.root.bind("<<ModeChanged>>", self.update_mode_visibility)
         
     def create_widgets(self):
         """创建SSH配置界面控件"""
+        row = 0
+        
+        # 新增：模式选择
+        mode_frame = ttk.LabelFrame(self.content_frame, text="运行模式", padding="10")
+        mode_frame.grid(row=row, column=0, columnspan=2, sticky=tk.EW, padx=8, pady=8)
+        row += 1
+        
+        self.mode_var = tk.StringVar(value="local")  # local或ssh
+        
+        ttk.Radiobutton(mode_frame, text="本地模式", variable=self.mode_var, 
+                      value="local", command=self.on_mode_changed).pack(side=tk.LEFT, padx=15)
+        ttk.Radiobutton(mode_frame, text="SSH远程模式", variable=self.mode_var, 
+                      value="ssh", command=self.on_mode_changed).pack(side=tk.LEFT, padx=15)
+        
         # SSH配置控件
-        ttk.Label(self.content_frame, text="IP地址:").grid(row=0, column=0, sticky=tk.W, padx=8, pady=8)
+        self.ssh_frame = ttk.LabelFrame(self.content_frame, text="SSH配置", padding="10")
+        self.ssh_frame.grid(row=row, column=0, columnspan=2, sticky=tk.EW, padx=8, pady=8)
+        row += 1
+        
+        ssh_row = 0
+        ttk.Label(self.ssh_frame, text="IP地址:").grid(row=ssh_row, column=0, sticky=tk.W, padx=8, pady=8)
         self.ssh_host_var = tk.StringVar()
-        ttk.Entry(self.content_frame, textvariable=self.ssh_host_var).grid(row=0, column=1, sticky=tk.EW, padx=8, pady=8)
+        ttk.Entry(self.ssh_frame, textvariable=self.ssh_host_var).grid(row=ssh_row, column=1, sticky=tk.EW, padx=8, pady=8)
+        ssh_row += 1
         
-        ttk.Label(self.content_frame, text="端口:").grid(row=1, column=0, sticky=tk.W, padx=8, pady=8)
+        ttk.Label(self.ssh_frame, text="端口:").grid(row=ssh_row, column=0, sticky=tk.W, padx=8, pady=8)
         self.ssh_port_var = tk.IntVar(value=22)
-        ttk.Entry(self.content_frame, textvariable=self.ssh_port_var, width=10).grid(row=1, column=1, sticky=tk.W, padx=8, pady=8)
+        ttk.Entry(self.ssh_frame, textvariable=self.ssh_port_var, width=10).grid(row=ssh_row, column=1, sticky=tk.W, padx=8, pady=8)
+        ssh_row += 1
         
-        ttk.Label(self.content_frame, text="用户名:").grid(row=2, column=0, sticky=tk.W, padx=8, pady=8)
+        ttk.Label(self.ssh_frame, text="用户名:").grid(row=ssh_row, column=0, sticky=tk.W, padx=8, pady=8)
         self.ssh_user_var = tk.StringVar()
-        ttk.Entry(self.content_frame, textvariable=self.ssh_user_var).grid(row=2, column=1, sticky=tk.EW, padx=8, pady=8)
+        ttk.Entry(self.ssh_frame, textvariable=self.ssh_user_var).grid(row=ssh_row, column=1, sticky=tk.EW, padx=8, pady=8)
+        ssh_row += 1
         
-        ttk.Label(self.content_frame, text="密码:").grid(row=3, column=0, sticky=tk.W, padx=8, pady=8)
+        ttk.Label(self.ssh_frame, text="密码:").grid(row=ssh_row, column=0, sticky=tk.W, padx=8, pady=8)
         self.ssh_password_var = tk.StringVar()
-        pwd_entry = ttk.Entry(self.content_frame, textvariable=self.ssh_password_var, show="*")
-        pwd_entry.grid(row=3, column=1, sticky=tk.EW, padx=8, pady=8)
+        pwd_entry = ttk.Entry(self.ssh_frame, textvariable=self.ssh_password_var, show="*")
+        pwd_entry.grid(row=ssh_row, column=1, sticky=tk.EW, padx=8, pady=8)
+        ssh_row += 1
         
         # 连接状态
         status_frame = ttk.Frame(self.content_frame)
-        status_frame.grid(row=4, column=0, columnspan=2, sticky=tk.EW, pady=10)
+        status_frame.grid(row=row, column=0, columnspan=2, sticky=tk.EW, pady=10)
+        row += 1
         
         self.ssh_status_var = tk.StringVar(value="未连接")
         self.ssh_status_label = ttk.Label(status_frame, textvariable=self.ssh_status_var, foreground="red")
@@ -110,7 +297,8 @@ class SSHConfigPanel(ttk.Frame):
         
         # 按钮区
         btn_frame = ttk.Frame(self.content_frame)
-        btn_frame.grid(row=5, column=0, columnspan=2, sticky=tk.EW, pady=10)
+        btn_frame.grid(row=row, column=0, columnspan=2, sticky=tk.EW, pady=10)
+        row += 1
         
         self.ssh_btn = ttk.Button(btn_frame, text="连接", command=self.toggle_ssh_connection)
         self.ssh_btn.pack(side=tk.LEFT, padx=8)
@@ -118,8 +306,35 @@ class SSHConfigPanel(ttk.Frame):
         save_btn = ttk.Button(btn_frame, text="保存配置", command=self.save_config)
         save_btn.pack(side=tk.RIGHT, padx=8)
         
+        # 初始更新可见性
+        self.update_mode_visibility(None)
+        
+    def on_mode_changed(self):
+        """模式改变时触发"""
+        mode = self.mode_var.get()
+        self.app.config["mode"] = mode
+        self.app.save_config()
+        self.update_mode_visibility(None)
+        self.app.root.event_generate("<<ModeChanged>>", when="tail")
+        
+    def update_mode_visibility(self, event):
+        """根据模式更新控件可见性"""
+        mode = self.mode_var.get()
+        if mode == "ssh":
+            self.ssh_frame.grid()
+            self.ssh_btn.config(state=tk.NORMAL)
+        else:
+            self.ssh_frame.grid_remove()
+            self.ssh_btn.config(state=tk.DISABLED)
+            # 如果之前处于连接状态，断开连接
+            if self.app.ssh_connected:
+                self.app.disconnect_ssh()
+        
     def load_config(self):
         """加载SSH配置"""
+        # 加载模式配置
+        self.mode_var.set(self.app.config.get("mode", "local"))
+        
         self.ssh_host_var.set(self.app.config["ssh_host"])
         self.ssh_port_var.set(self.app.config["ssh_port"])
         self.ssh_user_var.set(self.app.config["ssh_user"])
@@ -132,8 +347,9 @@ class SSHConfigPanel(ttk.Frame):
         self.app.config["ssh_port"] = self.ssh_port_var.get() or 22
         self.app.config["ssh_user"] = self.ssh_user_var.get().strip()
         self.app.config["ssh_password"] = self.ssh_password_var.get().strip()
+        self.app.config["mode"] = self.mode_var.get()
         self.app.save_config()
-        messagebox.showinfo("成功", "SSH配置已保存")
+        messagebox.showinfo("成功", "配置已保存")
         
     def toggle_ssh_connection(self):
         """切换SSH连接状态"""
@@ -156,7 +372,7 @@ class SSHConfigPanel(ttk.Frame):
             self.ssh_btn.configure(text="连接")
 
 class AutomationPanel(ttk.Frame):
-    """自动化操作面板"""
+    """自动化操作面板 - 新增文件选择按钮"""
     def __init__(self, parent, app):
         super().__init__(parent)
         self.app = app
@@ -180,19 +396,26 @@ class AutomationPanel(ttk.Frame):
         
         # 绑定状态更新事件
         self.app.root.bind("<<ExecutionStatusChanged>>", self.update_exec_status)
+        self.app.root.bind("<<ModeChanged>>", self.update_mode_visibility)
         
         # 强制更新滚动区域
         self.scrollable_frame.force_update()
         
     def create_widgets(self):
-        """创建自动化操作界面控件"""
+        """创建自动化操作界面控件 - 新增文件选择按钮"""
         row = 0
         
         # 基础路径配置
-        ttk.Label(self.inner_frame, text="远程基础路径:").grid(row=row, column=0, sticky=tk.W, padx=8, pady=8)
+        path_frame = ttk.Frame(self.inner_frame)
+        path_frame.grid(row=row, column=0, columnspan=2, sticky=tk.EW, padx=8, pady=8)
+        path_frame.columnconfigure(1, weight=1)
+        
+        ttk.Label(path_frame, text="基础路径:").grid(row=0, column=0, sticky=tk.W, padx=8, pady=0)
         self.base_dir_var = tk.StringVar()
-        self.base_dir_entry = ttk.Entry(self.inner_frame, textvariable=self.base_dir_var)
-        self.base_dir_entry.grid(row=row, column=1, sticky=tk.EW, padx=8, pady=8)
+        ttk.Entry(path_frame, textvariable=self.base_dir_var).grid(row=0, column=1, sticky=tk.EW, padx=8, pady=0)
+        self.browse_base_dir_btn = ttk.Button(path_frame, text="浏览...", width=8,
+                                           command=lambda: self.browse_path(self.base_dir_var, is_directory=True))
+        self.browse_base_dir_btn.grid(row=0, column=2, padx=8, pady=0)
         row += 1
         
         # 执行状态显示
@@ -229,26 +452,41 @@ class AutomationPanel(ttk.Frame):
         ttk.Button(reset_frame, text="Reset Slave", command=lambda: self.app.queue_command("reset_slave")).pack(side=tk.LEFT, padx=8)
         
         # 路径配置区
-        config_frame = ttk.LabelFrame(self.inner_frame, text="远程文件配置", padding="10")
+        config_frame = ttk.LabelFrame(self.inner_frame, text="文件配置", padding="10")
         config_frame.grid(row=row, column=0, columnspan=2, sticky=tk.EW, padx=8, pady=8)
         config_frame.columnconfigure(1, weight=1)
         row += 1
         
         config_row = 0
         # haps100control路径
-        ttk.Label(config_frame, text="haps100control路径:").grid(row=config_row, column=0, sticky=tk.W, padx=8, pady=8)
+        haps_frame = ttk.Frame(config_frame)
+        haps_frame.grid(row=config_row, column=0, columnspan=2, sticky=tk.EW, padx=8, pady=8)
+        haps_frame.columnconfigure(1, weight=1)
+        
+        ttk.Label(haps_frame, text="haps100control路径:").grid(row=0, column=0, sticky=tk.W, padx=8, pady=0)
         self.haps_control_var = tk.StringVar()
-        ttk.Entry(config_frame, textvariable=self.haps_control_var).grid(row=config_row, column=1, sticky=tk.EW, padx=8, pady=8)
+        ttk.Entry(haps_frame, textvariable=self.haps_control_var).grid(row=0, column=1, sticky=tk.EW, padx=8, pady=0)
+        self.browse_haps_btn = ttk.Button(haps_frame, text="浏览...", width=8,
+                                       command=lambda: self.browse_path(self.haps_control_var, file_ext=".bat"))
+        self.browse_haps_btn.grid(row=0, column=2, padx=8, pady=0)
         config_row += 1
         
         # xactorscmd路径
-        ttk.Label(config_frame, text="xactorscmd路径:").grid(row=config_row, column=0, sticky=tk.W, padx=8, pady=8)
+        xactor_frame = ttk.Frame(config_frame)
+        xactor_frame.grid(row=config_row, column=0, columnspan=2, sticky=tk.EW, padx=8, pady=8)
+        xactor_frame.columnconfigure(1, weight=1)
+        
+        ttk.Label(xactor_frame, text="xactorscmd路径:").grid(row=0, column=0, sticky=tk.W, padx=8, pady=0)
         self.xactorscmd_var = tk.StringVar()
-        ttk.Entry(config_frame, textvariable=self.xactorscmd_var).grid(row=config_row, column=1, sticky=tk.EW, padx=8, pady=8)
+        ttk.Entry(xactor_frame, textvariable=self.xactorscmd_var).grid(row=0, column=1, sticky=tk.EW, padx=8, pady=0)
+        self.browse_xactor_btn = ttk.Button(xactor_frame, text="浏览...", width=8,
+                                         command=lambda: self.browse_path(self.xactorscmd_var, file_ext=".bat"))
+        self.browse_xactor_btn.grid(row=0, column=2, padx=8, pady=0)
         config_row += 1
         
         # TCL路径配置
         self.tcl_vars = {}
+        self.tcl_buttons = {}
         tcl_configs = [
             ("Load All TCL:", "load_all_tcl"),
             ("Load Master TCL:", "load_master_tcl"),
@@ -258,9 +496,16 @@ class AutomationPanel(ttk.Frame):
             ("Reset Slave TCL:", "reset_slave_tcl")
         ]
         for label_text, key in tcl_configs:
+            tcl_frame = ttk.Frame(config_frame)
+            tcl_frame.grid(row=config_row, column=0, columnspan=2, sticky=tk.EW, padx=8, pady=8)
+            tcl_frame.columnconfigure(1, weight=1)
+            
+            ttk.Label(tcl_frame, text=label_text).grid(row=0, column=0, sticky=tk.W, padx=8, pady=0)
             self.tcl_vars[key] = tk.StringVar()
-            ttk.Label(config_frame, text=label_text).grid(row=config_row, column=0, sticky=tk.W, padx=8, pady=8)
-            ttk.Entry(config_frame, textvariable=self.tcl_vars[key]).grid(row=config_row, column=1, sticky=tk.EW, padx=8, pady=8)
+            ttk.Entry(tcl_frame, textvariable=self.tcl_vars[key]).grid(row=0, column=1, sticky=tk.EW, padx=8, pady=0)
+            self.tcl_buttons[key] = ttk.Button(tcl_frame, text="浏览...", width=8,
+                                           command=lambda k=key: self.browse_path(self.tcl_vars[k], file_ext=".tcl"))
+            self.tcl_buttons[key].grid(row=0, column=2, padx=8, pady=0)
             config_row += 1
         
         # 保存配置按钮
@@ -275,6 +520,52 @@ class AutomationPanel(ttk.Frame):
         
         # 强制更新滚动区域
         self.scrollable_frame.force_update()
+        
+    def browse_path(self, var, is_directory=False, file_ext=""):
+        """浏览选择路径"""
+        mode = self.app.config.get("mode", "local")
+        
+        if mode == "local":
+            # 本地文件选择
+            if is_directory:
+                path = filedialog.askdirectory()
+            else:
+                if file_ext == ".tcl":
+                    path = filedialog.askopenfilename(
+                        filetypes=[("TCL文件", "*.tcl"), ("所有文件", "*.*")]
+                    )
+                elif file_ext == ".bat":
+                    path = filedialog.askopenfilename(
+                        filetypes=[("批处理文件", "*.bat"), ("所有文件", "*.*")]
+                    )
+                else:
+                    path = filedialog.askopenfilename()
+            
+            if path:
+                var.set(path)
+        else:
+            # SSH模式下的远程文件选择
+            if not self.app.ssh_connected:
+                messagebox.showwarning("未连接", "请先建立SSH连接")
+                return
+                
+            try:
+                # 获取当前路径作为初始目录
+                current_path = var.get().strip()
+                initial_dir = os.path.dirname(current_path) if current_path else self.app.config.get("base_dir", "")
+                
+                # 打开远程文件浏览器
+                browser = RemoteFileBrowser(self.parent, self.app.ssh_client, initial_dir)
+                if browser.selected_path:
+                    var.set(browser.selected_path)
+            except Exception as e:
+                messagebox.showerror("错误", f"浏览远程文件失败：{str(e)}")
+        
+    def update_mode_visibility(self, event):
+        """根据模式更新控件状态"""
+        mode = self.app.config.get("mode", "local")
+        # 在两种模式下都显示浏览按钮，只是功能不同
+        pass
         
     def load_config(self):
         """加载自动化操作配置"""
@@ -315,7 +606,7 @@ class AutomationPanel(ttk.Frame):
             self.status_label.configure(foreground="green")
 
 class CustomCommandsPanel(ttk.Frame):
-    """自定义命令面板 - 修复执行逻辑"""
+    """自定义命令面板 - 新增文件选择按钮"""
     def __init__(self, parent, app):
         super().__init__(parent)
         self.app = app
@@ -342,15 +633,20 @@ class CustomCommandsPanel(ttk.Frame):
         self.scrollable_frame.force_update()
         
     def create_widgets(self):
-        """创建自定义命令界面控件 - 新增默认TCL路径配置"""
+        """创建自定义命令界面控件 - 新增文件选择按钮"""
         row = 0
         
-        # 新增：默认TCL文件路径配置
-        ttk.Label(self.inner_frame, text="haps_control_default.tcl路径:").grid(
-            row=row, column=0, sticky=tk.W, padx=8, pady=8)
+        # 默认TCL文件路径配置
+        tcl_frame = ttk.Frame(self.inner_frame)
+        tcl_frame.grid(row=row, column=0, columnspan=2, sticky=tk.EW, padx=8, pady=8)
+        tcl_frame.columnconfigure(1, weight=1)
+        
+        ttk.Label(tcl_frame, text="haps_control_default.tcl路径:").grid(row=0, column=0, sticky=tk.W, padx=8, pady=0)
         self.default_tcl_var = tk.StringVar()
-        ttk.Entry(self.inner_frame, textvariable=self.default_tcl_var).grid(
-            row=row, column=1, sticky=tk.EW, padx=8, pady=8)
+        ttk.Entry(tcl_frame, textvariable=self.default_tcl_var).grid(row=0, column=1, sticky=tk.EW, padx=8, pady=0)
+        self.browse_default_tcl_btn = ttk.Button(tcl_frame, text="浏览...", width=8,
+                                              command=lambda: self.browse_path(self.default_tcl_var, file_ext=".tcl"))
+        self.browse_default_tcl_btn.grid(row=0, column=2, padx=8, pady=0)
         row += 1
         
         # 命令框容器
@@ -377,6 +673,39 @@ class CustomCommandsPanel(ttk.Frame):
             ttk.Label(self.inner_frame, text="").grid(row=row, column=0, pady=10)
             row += 1
         
+    def browse_path(self, var, file_ext=""):
+        """浏览选择路径"""
+        mode = self.app.config.get("mode", "local")
+        
+        if mode == "local":
+            # 本地文件选择
+            if file_ext == ".tcl":
+                path = filedialog.askopenfilename(
+                    filetypes=[("TCL文件", "*.tcl"), ("所有文件", "*.*")]
+                )
+            else:
+                path = filedialog.askopenfilename()
+            
+            if path:
+                var.set(path)
+        else:
+            # SSH模式下的远程文件选择
+            if not self.app.ssh_connected:
+                messagebox.showwarning("未连接", "请先建立SSH连接")
+                return
+                
+            try:
+                # 获取当前路径作为初始目录
+                current_path = var.get().strip()
+                initial_dir = os.path.dirname(current_path) if current_path else self.app.config.get("base_dir", "")
+                
+                # 打开远程文件浏览器
+                browser = RemoteFileBrowser(self.parent, self.app.ssh_client, initial_dir)
+                if browser.selected_path:
+                    var.set(browser.selected_path)
+            except Exception as e:
+                messagebox.showerror("错误", f"浏览远程文件失败：{str(e)}")
+
     def create_command_entries(self):
         """创建自定义命令输入框"""
         # 清空现有框体
@@ -470,6 +799,7 @@ class HAPSAutomationGUI:
         self.default_xactorscmd = "C:\\Synopsys\\protocomp-rtV-2024.09\\bin\\xactorscmd.bat"
         
         self.config = {
+            "mode": "local",  # 新增：模式配置 local/ssh
             "ssh_host": "192.168.1.1",
             "ssh_port": 22,
             "ssh_user": "admin",
@@ -484,7 +814,6 @@ class HAPSAutomationGUI:
             "reset_master_tcl": "tcl\\reset_master.tcl",
             "reset_slave_tcl": "tcl\\reset_slave.tcl",
             "custom_commands": [""],
-            # 新增：默认TCL文件路径配置
             "default_tcl_path": "tcl\\haps_control_default.tcl"
         }
         
@@ -518,7 +847,7 @@ class HAPSAutomationGUI:
         self.custom_commands_panel = CustomCommandsPanel(self.notebook, self)
         
         # 添加到标签页
-        self.notebook.add(self.ssh_panel, text="SSH配置")
+        self.notebook.add(self.ssh_panel, text="连接配置")
         self.notebook.add(self.automation_panel, text="自动化操作")
         self.notebook.add(self.custom_commands_panel, text="自定义命令")
         
@@ -548,11 +877,14 @@ class HAPSAutomationGUI:
         self.log_text.grid(row=1, column=0, sticky=tk.NSEW, pady=(0, 5))
         
         # 底部状态栏
-        self.status_bar = ttk.Label(root, text="SSH未连接", relief=tk.SUNKEN, anchor=tk.W)
+        self.status_bar = ttk.Label(root, text="就绪 - 本地模式", relief=tk.SUNKEN, anchor=tk.W)
         self.status_bar.grid(row=1, column=0, columnspan=2, sticky=tk.EW, padx=10, pady=(0, 5))
         
         # 窗口关闭事件
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
+        
+        # 初始更新状态栏
+        self.update_status_bar()
 
     # SSH连接逻辑
     def connect_ssh(self):
@@ -594,7 +926,7 @@ class HAPSAutomationGUI:
                 
             if "HAPS_CONNECTED" in output or "484150535f434f4e4e4543544544" in output:
                 self.ssh_connected = True
-                self.status_bar.config(text=f"SSH已连接: {host}")
+                self.update_status_bar()
                 self.sync_log(f"SSH连接成功：{host}:{port}")
                 self.check_remote_paths()
             else:
@@ -624,7 +956,7 @@ class HAPSAutomationGUI:
                 self.sync_log(f"断开SSH时出错：{str(e)}")
         
         self.ssh_connected = False
-        self.status_bar.config(text="SSH未连接")
+        self.update_status_bar()
         self.ssh_client = None
         self.root.event_generate("<<SSHStatusChanged>>", when="tail")
 
@@ -635,7 +967,6 @@ class HAPSAutomationGUI:
             (self.config["xactorscmd_path"], "xactorscmd.bat"),
             (self.config["base_dir"], "基础目录"),
             (os.path.join(self.config["base_dir"], "system", "targetsystem.tsd"), "targetsystem.tsd"),
-            # 新增：检查默认TCL文件路径
             (self.get_full_default_tcl_path(), "haps_control_default.tcl")
         ]
         
@@ -658,14 +989,16 @@ class HAPSAutomationGUI:
                     self.sync_log(f"[{desc}] 路径存在：{path}")
                 else:
                     self.sync_log(f"[{desc}] 路径不存在：{path}")
-                    messagebox.showwarning("路径警告", f"[{desc}] 远程路径不存在：{path}")
+                    messagebox.showwarning("路径警告", f"[{desc}] 路径不存在：{path}")
             except Exception as e:
                 self.sync_log(f"[{desc}] 检查失败：{str(e)}")
 
-    # 命令执行逻辑 - 核心修改：自定义命令执行流程
+    # 命令执行逻辑
     def queue_command(self, cmd_type):
         """将预设命令加入队列"""
-        if not self.ssh_connected:
+        mode = self.config.get("mode", "local")
+        
+        if mode == "ssh" and not self.ssh_connected:
             messagebox.showerror("未连接", "请先建立SSH连接")
             return
         
@@ -678,8 +1011,10 @@ class HAPSAutomationGUI:
         self.update_exec_status()
 
     def queue_custom_command(self, cmd_text):
-        """将自定义命令加入队列 - 按新逻辑处理"""
-        if not self.ssh_connected:
+        """将自定义命令加入队列"""
+        mode = self.config.get("mode", "local")
+        
+        if mode == "ssh" and not self.ssh_connected:
             messagebox.showerror("未连接", "请先建立SSH连接")
             return
         
@@ -710,7 +1045,7 @@ class HAPSAutomationGUI:
                         self.run_haps_command(cmd_content)
                     elif cmd_type == 'custom':
                         self.sync_log(f"开始执行自定义命令：{cmd_content}")
-                        self.run_custom_tcl_command(cmd_content)  # 调用新的自定义命令执行方法
+                        self.run_custom_tcl_command(cmd_content)
                 except Exception as e:
                     self.sync_log(f"命令执行异常：{str(e)}")
                 finally:
@@ -735,7 +1070,7 @@ class HAPSAutomationGUI:
         return default_tcl_path
 
     def generate_temp_tcl_file(self, custom_command):
-        """生成临时TCL文件：使用SFTP方式，避免命令行转义问题"""
+        """生成临时TCL文件"""
         try:
             # 1. 获取路径信息
             default_tcl_path = self.get_full_default_tcl_path()
@@ -747,60 +1082,75 @@ class HAPSAutomationGUI:
             
             # 2. 读取默认TCL文件内容
             self.sync_log("读取默认TCL文件内容...")
-            cat_cmd = f'type "{default_tcl_path}"'  # Windows系统使用type命令
-            stdin, stdout, stderr = self.ssh_client.exec_command(cat_cmd, timeout=30)
-            default_content_bytes = stdout.read()
-            error_bytes = stderr.read()
             
-            error = self.process_data(error_bytes)
-            if error:
-                raise Exception(f"读取默认TCL文件错误：{error}")
+            mode = self.config.get("mode", "local")
+            if mode == "local":
+                # 本地模式：直接读取文件
+                with open(default_tcl_path, 'r', encoding='utf-8', errors='replace') as f:
+                    default_content = f.read()
+            else:
+                # SSH模式：通过命令读取
+                cat_cmd = f'type "{default_tcl_path}"'  # Windows系统使用type命令
+                stdin, stdout, stderr = self.ssh_client.exec_command(cat_cmd, timeout=30)
+                default_content_bytes = stdout.read()
+                error_bytes = stderr.read()
+                
+                error = self.process_data(error_bytes)
+                if error:
+                    raise Exception(f"读取默认TCL文件错误：{error}")
+                
+                # 处理内容编码
+                try:
+                    default_content = default_content_bytes.decode('gbk', errors='replace')
+                except:
+                    default_content = default_content_bytes.decode('utf-8', errors='replace')
             
-            # 3. 处理内容编码
-            try:
-                default_content = default_content_bytes.decode('gbk', errors='replace')
-            except:
-                default_content = default_content_bytes.decode('utf-8', errors='replace')
-            
-            # 4. 构建临时文件内容
+            # 3. 构建临时文件内容
             temp_content = f"{default_content}\n"  # 默认内容
             temp_content += f"{custom_command}\n"  # 自定义命令
             temp_content += "cfg_close $HAPS_HANDLE\n"  # 关闭句柄命令
             
-            # 5. 使用SFTP方式写入临时文件（修复的核心部分）
-            self.sync_log("通过SFTP生成临时TCL文件...")
-            sftp = self.ssh_client.open_sftp()
+            # 4. 写入临时文件
+            self.sync_log("生成临时TCL文件...")
+            if mode == "local":
+                # 本地模式：直接写入文件
+                with open(temp_tcl_path, 'w', encoding='utf-8') as f:
+                    f.write(temp_content)
+            else:
+                # SSH模式：使用SFTP写入
+                sftp = self.ssh_client.open_sftp()
+                
+                # 确保目录存在
+                temp_dir = os.path.dirname(temp_tcl_path)
+                if temp_dir:
+                    try:
+                        sftp.stat(temp_dir)
+                    except FileNotFoundError:
+                        self.sync_log(f"创建目录：{temp_dir}")
+                        # 递归创建目录的函数
+                        def mkdir_p(sftp, remote_directory):
+                            if remote_directory == '/':
+                                sftp.chdir('/')
+                                return
+                            if remote_directory == '':
+                                return
+                            try:
+                                sftp.stat(remote_directory)
+                            except FileNotFoundError:
+                                dirname, basename = os.path.split(remote_directory.rstrip('/'))
+                                mkdir_p(sftp, dirname)
+                                sftp.mkdir(basename)
+                                sftp.chdir(basename)
+                                return
+                        mkdir_p(sftp, temp_dir)
+                
+                # 写入文件内容
+                with sftp.file(temp_tcl_path, 'w') as f:
+                    # 确保使用正确的换行符
+                    f.write(temp_content.replace('\n', '\r\n'))
+                
+                sftp.close()
             
-            # 确保目录存在
-            temp_dir = os.path.dirname(temp_tcl_path)
-            if temp_dir:
-                try:
-                    sftp.stat(temp_dir)
-                except FileNotFoundError:
-                    self.sync_log(f"创建目录：{temp_dir}")
-                    # 递归创建目录的函数
-                    def mkdir_p(sftp, remote_directory):
-                        if remote_directory == '/':
-                            sftp.chdir('/')
-                            return
-                        if remote_directory == '':
-                            return
-                        try:
-                            sftp.stat(remote_directory)
-                        except FileNotFoundError:
-                            dirname, basename = os.path.split(remote_directory.rstrip('/'))
-                            mkdir_p(sftp, dirname)
-                            sftp.mkdir(basename)
-                            sftp.chdir(basename)
-                            return
-                    mkdir_p(sftp, temp_dir)
-            
-            # 写入文件内容
-            with sftp.file(temp_tcl_path, 'w') as f:
-                # 确保使用正确的换行符
-                f.write(temp_content.replace('\n', '\r\n'))
-            
-            sftp.close()
             self.sync_log(f"临时TCL文件生成成功：{temp_tcl_path}")
             return temp_tcl_path
             
@@ -809,7 +1159,7 @@ class HAPSAutomationGUI:
             raise
 
     def run_custom_tcl_command(self, custom_command):
-        # 保持与之前相同的实现...
+        """执行自定义命令"""
         try:
             # 1. 验证必要路径配置
             haps_ctrl = self.config["haps_control_path"]
@@ -823,27 +1173,68 @@ class HAPSAutomationGUI:
             
             # 3. 构建执行命令
             base_dir = self.config.get("base_dir", "").strip()
+            mode = self.config.get("mode", "local")
+            
+            # 构建命令
             if base_dir:
                 cmd = f'cd /d "{base_dir}" && call "{haps_ctrl}" "{xactorscmd}" "{temp_tcl_path}"'
             else:
                 cmd = f'call "{haps_ctrl}" "{xactorscmd}" "{temp_tcl_path}"'
             
-            self.sync_log(f"执行自定义命令：{cmd}")
+            self.sync_log(f"执行命令：{cmd}")
             
             # 4. 执行命令
-            success, msg = self.run_remote_command(cmd)[:2]
-            if success:
-                self.sync_log(f"自定义命令执行成功：{msg}")
+            if mode == "local":
+                # 本地模式：使用subprocess执行
+                import subprocess
+                import shlex
+                
+                try:
+                    # 执行命令
+                    process = subprocess.Popen(
+                        cmd,
+                        shell=True,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.STDOUT,
+                        text=True,
+                        encoding='gbk',
+                        errors='replace'
+                    )
+                    
+                    # 实时输出
+                    for line in process.stdout:
+                        self.sync_log(f"输出：{line.rstrip()}")
+                    
+                    # 等待完成
+                    return_code = process.wait()
+                    
+                    if return_code == 0:
+                        self.sync_log(f"自定义命令执行成功，返回码：{return_code}")
+                        return True, f"返回码{return_code}"
+                    else:
+                        self.sync_log(f"自定义命令执行失败，返回码：{return_code}")
+                        return False, f"返回码{return_code}"
+                        
+                except Exception as e:
+                    return False, str(e)
             else:
-                self.sync_log(f"自定义命令执行失败：{msg}")
-                messagebox.showerror("执行失败", f"自定义命令失败：{msg}")
+                # SSH模式：使用SSH执行
+                success, msg = self.run_remote_command(cmd)[:2]
+                if success:
+                    self.sync_log(f"自定义命令执行成功：{msg}")
+                else:
+                    self.sync_log(f"自定义命令执行失败：{msg}")
+                    messagebox.showerror("执行失败", f"自定义命令失败：{msg}")
+                return success, msg
                 
         except ValueError as e:
             self.sync_log(f"参数错误：{str(e)}")
             messagebox.showerror("参数错误", str(e))
+            return False, str(e)
         except Exception as e:
             self.sync_log(f"自定义命令执行异常：{str(e)}")
             messagebox.showerror("执行异常", str(e))
+            return False, str(e)
 
     def run_haps_command(self, cmd_type):
         """执行HAPS预设命令"""
@@ -851,6 +1242,7 @@ class HAPSAutomationGUI:
             haps_ctrl = self.config["haps_control_path"]
             xactorscmd = self.config["xactorscmd_path"]
             base_dir = self.config["base_dir"]
+            mode = self.config.get("mode", "local")
             
             if not haps_ctrl or not xactorscmd:
                 raise ValueError("haps100control和xactorscmd路径不能为空")
@@ -871,25 +1263,72 @@ class HAPSAutomationGUI:
             if not tcl_script:
                 raise ValueError(f"未配置{cmd_type}的TCL脚本路径")
             
-            cmd = f'cd /d "{base_dir}" && call "{haps_ctrl}" "{xactorscmd}" "{tcl_script}"'
-            self.sync_log(f"构建HAPS命令：{cmd}")
-            
-            success, msg = self.run_remote_command(cmd)[:2]
-            if success:
-                self.sync_log(f"预设命令[{cmd_type}]执行成功：{msg}")
+            # 构建命令
+            if base_dir:
+                cmd = f'cd /d "{base_dir}" && call "{haps_ctrl}" "{xactorscmd}" "{tcl_script}"'
             else:
-                self.sync_log(f"预设命令[{cmd_type}]执行失败：{msg}")
-                messagebox.showerror("执行失败", f"{cmd_type}命令失败：{msg}")
+                cmd = f'call "{haps_ctrl}" "{xactorscmd}" "{tcl_script}"'
+            
+            self.sync_log(f"构建命令：{cmd}")
+            
+            # 执行命令
+            if mode == "local":
+                # 本地模式：使用subprocess执行
+                import subprocess
+                
+                try:
+                    # 执行命令
+                    process = subprocess.Popen(
+                        cmd,
+                        shell=True,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.STDOUT,
+                        text=True,
+                        encoding='gbk',
+                        errors='replace'
+                    )
+                    
+                    # 实时输出
+                    for line in process.stdout:
+                        self.sync_log(f"输出：{line.rstrip()}")
+                    
+                    # 等待完成
+                    return_code = process.wait()
+                    
+                    if return_code == 0:
+                        self.sync_log(f"预设命令[{cmd_type}]执行成功，返回码：{return_code}")
+                        return True, f"返回码{return_code}"
+                    else:
+                        self.sync_log(f"预设命令[{cmd_type}]执行失败，返回码：{return_code}")
+                        messagebox.showerror("执行失败", f"{cmd_type}命令失败，返回码：{return_code}")
+                        return False, f"返回码{return_code}"
+                        
+                except Exception as e:
+                    error_msg = str(e)
+                    self.sync_log(f"预设命令[{cmd_type}]执行异常：{error_msg}")
+                    messagebox.showerror("执行异常", error_msg)
+                    return False, error_msg
+            else:
+                # SSH模式：使用SSH执行
+                success, msg = self.run_remote_command(cmd)[:2]
+                if success:
+                    self.sync_log(f"预设命令[{cmd_type}]执行成功：{msg}")
+                else:
+                    self.sync_log(f"预设命令[{cmd_type}]执行失败：{msg}")
+                    messagebox.showerror("执行失败", f"{cmd_type}命令失败：{msg}")
+                return success, msg
                 
         except ValueError as e:
             self.sync_log(f"参数错误：{str(e)}")
             messagebox.showerror("参数错误", str(e))
+            return False, str(e)
         except Exception as e:
             self.sync_log(f"HAPS命令执行异常：{str(e)}")
             messagebox.showerror("执行异常", str(e))
+            return False, str(e)
 
     def run_remote_command(self, cmd):
-        """执行远程命令"""
+        """执行远程命令（SSH模式）"""
         try:
             # 执行命令时指定终端类型，避免某些服务器默认编码问题
             channel = self.ssh_client.get_transport().open_session()
@@ -930,7 +1369,7 @@ class HAPSAutomationGUI:
             return False, str(e), -1, ""
 
     def process_data(self, data):
-        """处理数据，强制使用GBK编码解决中文问题"""
+        """处理数据编码"""
         if isinstance(data, str):
             return data.rstrip('\r\n')
             
@@ -1032,6 +1471,22 @@ class HAPSAutomationGUI:
     def update_exec_status(self):
         """更新执行状态"""
         self.root.event_generate("<<ExecutionStatusChanged>>", when="tail")
+        self.update_status_bar()
+
+    def update_status_bar(self):
+        """更新状态栏"""
+        mode = self.config.get("mode", "local")
+        if mode == "ssh":
+            if self.ssh_connected:
+                self.status_bar.config(text=f"SSH已连接 - {self.config['ssh_host']}")
+            else:
+                self.status_bar.config(text="SSH未连接")
+        else:
+            if self.is_processing:
+                queue_size = self.command_queue.qsize()
+                self.status_bar.config(text=f"本地模式 - 执行中，剩余：{queue_size}")
+            else:
+                self.status_bar.config(text="本地模式 - 就绪")
 
     def clear_command_queue(self):
         """清空命令队列"""
