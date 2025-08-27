@@ -58,7 +58,7 @@ class ScrollableFrame(ttk.Frame):
         self.canvas.configure(scrollregion=self.canvas.bbox("all"))
 
 class RemoteFileBrowser(tk.Toplevel):
-    """远程文件浏览器对话框"""
+    """远程文件浏览器对话框 - 增加手动输入路径和回退上级目录功能"""
     def __init__(self, parent, ssh_client, initial_dir="/"):
         super().__init__(parent)
         self.parent = parent
@@ -67,8 +67,8 @@ class RemoteFileBrowser(tk.Toplevel):
         self.selected_path = None
         
         self.title("浏览远程文件")
-        self.geometry("600x400")
-        self.minsize(500, 300)
+        self.geometry("700x500")
+        self.minsize(600, 400)
         
         # 创建UI
         self.create_widgets()
@@ -82,13 +82,25 @@ class RemoteFileBrowser(tk.Toplevel):
         self.wait_window(self)
     
     def create_widgets(self):
-        # 路径显示
-        path_frame = ttk.Frame(self)
-        path_frame.pack(fill=tk.X, padx=10, pady=5)
+        """创建远程文件浏览器界面控件"""
+        # 路径导航区
+        nav_frame = ttk.Frame(self)
+        nav_frame.pack(fill=tk.X, padx=10, pady=5)
         
-        ttk.Label(path_frame, text="当前路径:").pack(side=tk.LEFT, padx=5)
+        # 回退按钮
+        self.back_btn = ttk.Button(nav_frame, text="上级目录", command=self.navigate_up)
+        self.back_btn.pack(side=tk.LEFT, padx=5)
+        
+        # 路径输入框
+        ttk.Label(nav_frame, text="路径:").pack(side=tk.LEFT, padx=5)
         self.path_var = tk.StringVar()
-        ttk.Label(path_frame, textvariable=self.path_var, foreground="blue").pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
+        self.path_entry = ttk.Entry(nav_frame, textvariable=self.path_var)
+        self.path_entry.pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
+        self.path_entry.bind("<Return>", lambda e: self.navigate_to_path())
+        
+        # 转到按钮
+        self.go_btn = ttk.Button(nav_frame, text="转到", command=self.navigate_to_path)
+        self.go_btn.pack(side=tk.LEFT, padx=5)
         
         # 文件列表
         list_frame = ttk.Frame(self)
@@ -119,6 +131,67 @@ class RemoteFileBrowser(tk.Toplevel):
         ttk.Button(btn_frame, text="选择", command=self.on_select).pack(side=tk.RIGHT, padx=5)
         ttk.Button(btn_frame, text="取消", command=self.on_cancel).pack(side=tk.RIGHT, padx=5)
     
+    def navigate_up(self):
+        """导航到上级目录"""
+        if self.current_dir in ["/", "", "\\", "."]:
+            return
+            
+        # 处理Windows路径
+        if "\\" in self.current_dir:
+            parent_dir = os.path.dirname(self.current_dir.rstrip("\\"))
+            if not parent_dir:  # 如果是根目录
+                parent_dir = self.current_dir.split("\\")[0] + "\\"
+        # 处理Unix路径
+        elif "/" in self.current_dir:
+            parent_dir = os.path.dirname(self.current_dir.rstrip("/"))
+            if not parent_dir:  # 如果是根目录
+                parent_dir = "/"
+        else:
+            parent_dir = ""
+            
+        self.current_dir = parent_dir
+        self.load_directory_contents()
+    
+    def navigate_to_path(self):
+        """导航到输入框中的路径"""
+        path = self.path_var.get().strip()
+        if not path:
+            return
+            
+        # 检查路径是否存在且是目录
+        cmd = f'if exist "{path}" (if exist "{path}\\*" (echo DIR_EXIST) else (echo FILE_EXIST)) else (echo NOT_EXIST)'
+        try:
+            stdin, stdout, stderr = self.ssh_client.exec_command(cmd, timeout=10)
+            output_bytes = stdout.read()
+            error_bytes = stderr.read()
+            
+            error = self.process_data(error_bytes)
+            if error:
+                raise Exception(f"检查路径错误：{error}")
+            
+            output = self.process_data(output_bytes).strip()
+            
+            if output == "DIR_EXIST" or "4449525f4558495354" in output:  # DIR_EXIST的十六进制
+                self.current_dir = path
+                self.load_directory_contents()
+            elif output == "FILE_EXIST":
+                # 如果是文件，导航到它所在的目录
+                dir_path = os.path.dirname(path)
+                self.current_dir = dir_path
+                self.load_directory_contents()
+                # 尝试选中该文件
+                file_name = os.path.basename(path)
+                for item in self.file_tree.get_children():
+                    if self.file_tree.item(item, "values")[0] == file_name:
+                        self.file_tree.selection_set(item)
+                        self.file_tree.see(item)
+                        break
+            else:
+                messagebox.showerror("错误", f"路径不存在：{path}")
+                
+        except Exception as e:
+            messagebox.showerror("错误", f"导航失败：{str(e)}")
+    
     def load_directory_contents(self):
         """加载目录内容"""
         # 清空现有内容
@@ -128,7 +201,7 @@ class RemoteFileBrowser(tk.Toplevel):
         self.path_var.set(self.current_dir)
         
         try:
-            # 执行ls命令获取目录内容
+            # 执行dir命令获取目录内容（只显示名称）
             cmd = f'dir /b /ad "{self.current_dir}"'  # 列出目录
             stdin, stdout, stderr = self.ssh_client.exec_command(cmd, timeout=10)
             dirs_bytes = stdout.read()
@@ -136,7 +209,13 @@ class RemoteFileBrowser(tk.Toplevel):
             
             error = self.process_data(error_bytes)
             if error:
-                raise Exception(f"读取目录错误：{error}")
+                # 尝试处理访问权限问题
+                if "拒绝访问" in error:
+                    self.sync_log(f"没有权限访问目录：{self.current_dir}")
+                    messagebox.showwarning("权限不足", f"没有权限访问目录：{self.current_dir}")
+                    return
+                else:
+                    raise Exception(f"读取目录错误：{error}")
             
             # 处理目录
             dirs = self.process_data(dirs_bytes).split('\r\n')
@@ -177,7 +256,7 @@ class RemoteFileBrowser(tk.Toplevel):
         
         if item_type == "目录":
             # 进入子目录
-            if self.current_dir.endswith('\\'):
+            if self.current_dir.endswith(('\\', '/')):
                 new_dir = f"{self.current_dir}{item_name}"
             else:
                 new_dir = f"{self.current_dir}\\{item_name}"
@@ -185,20 +264,24 @@ class RemoteFileBrowser(tk.Toplevel):
             self.load_directory_contents()
     
     def on_select(self):
-        """选择文件"""
+        """选择文件或目录"""
         selection = self.file_tree.selection()
         if not selection:
-            messagebox.showinfo("提示", "请选择一个文件或目录")
+            # 如果没有选择任何项，使用当前目录
+            self.selected_path = self.current_dir
+            self.destroy()
             return
             
         item = selection[0]
         item_name = self.file_tree.item(item, "values")[0]
+        item_type = self.file_tree.item(item, "values")[1]
         
-        if self.current_dir.endswith('\\'):
-            self.selected_path = f"{self.current_dir}{item_name}"
+        if self.current_dir.endswith(('\\', '/')):
+            full_path = f"{self.current_dir}{item_name}"
         else:
-            self.selected_path = f"{self.current_dir}\\{item_name}"
+            full_path = f"{self.current_dir}\\{item_name}"
             
+        self.selected_path = full_path
         self.destroy()
     
     def on_cancel(self):
@@ -218,9 +301,16 @@ class RemoteFileBrowser(tk.Toplevel):
                 return data.decode('utf-8', errors='replace')
             
         return str(data)
+    
+    def sync_log(self, message):
+        """同步日志到主窗口"""
+        if hasattr(self.parent, 'sync_log'):
+            self.parent.sync_log(message)
+        else:
+            print(message)
 
 class SSHConfigPanel(ttk.Frame):
-    """SSH配置面板 - 新增模式切换"""
+    """SSH配置面板"""
     def __init__(self, parent, app):
         super().__init__(parent)
         self.app = app
@@ -247,7 +337,7 @@ class SSHConfigPanel(ttk.Frame):
         """创建SSH配置界面控件"""
         row = 0
         
-        # 新增：模式选择
+        # 模式选择
         mode_frame = ttk.LabelFrame(self.content_frame, text="运行模式", padding="10")
         mode_frame.grid(row=row, column=0, columnspan=2, sticky=tk.EW, padx=8, pady=8)
         row += 1
@@ -372,7 +462,7 @@ class SSHConfigPanel(ttk.Frame):
             self.ssh_btn.configure(text="连接")
 
 class AutomationPanel(ttk.Frame):
-    """自动化操作面板 - 新增文件选择按钮"""
+    """自动化操作面板"""
     def __init__(self, parent, app):
         super().__init__(parent)
         self.app = app
@@ -402,7 +492,7 @@ class AutomationPanel(ttk.Frame):
         self.scrollable_frame.force_update()
         
     def create_widgets(self):
-        """创建自动化操作界面控件 - 新增文件选择按钮"""
+        """创建自动化操作界面控件"""
         row = 0
         
         # 基础路径配置
@@ -606,7 +696,7 @@ class AutomationPanel(ttk.Frame):
             self.status_label.configure(foreground="green")
 
 class CustomCommandsPanel(ttk.Frame):
-    """自定义命令面板 - 新增文件选择按钮"""
+    """自定义命令面板"""
     def __init__(self, parent, app):
         super().__init__(parent)
         self.app = app
@@ -633,7 +723,7 @@ class CustomCommandsPanel(ttk.Frame):
         self.scrollable_frame.force_update()
         
     def create_widgets(self):
-        """创建自定义命令界面控件 - 新增文件选择按钮"""
+        """创建自定义命令界面控件"""
         row = 0
         
         # 默认TCL文件路径配置
@@ -799,7 +889,7 @@ class HAPSAutomationGUI:
         self.default_xactorscmd = "C:\\Synopsys\\protocomp-rtV-2024.09\\bin\\xactorscmd.bat"
         
         self.config = {
-            "mode": "local",  # 新增：模式配置 local/ssh
+            "mode": "local",  # 模式配置 local/ssh
             "ssh_host": "192.168.1.1",
             "ssh_port": 22,
             "ssh_user": "admin",
@@ -961,37 +1051,97 @@ class HAPSAutomationGUI:
         self.root.event_generate("<<SSHStatusChanged>>", when="tail")
 
     def check_remote_paths(self):
-        """检查远程关键路径"""
-        paths = [
-            (self.config["haps_control_path"], "haps100control.bat"),
-            (self.config["xactorscmd_path"], "xactorscmd.bat"),
-            (self.config["base_dir"], "基础目录"),
-            (os.path.join(self.config["base_dir"], "system", "targetsystem.tsd"), "targetsystem.tsd"),
-            (self.get_full_default_tcl_path(), "haps_control_default.tcl")
+        """检查远程关键路径 - 优化基础路径判断逻辑"""
+        base_dir = self.config.get("base_dir", "").strip()
+        
+        # 1. 检查基础路径（只需要是目录即可）
+        if base_dir:
+            self.check_path(base_dir, "基础目录", is_directory=True)
+        
+        # 2. 检查其他文件路径
+        file_paths = [
+            (self.config["haps_control_path"], "haps100control.bat", False),
+            (self.config["xactorscmd_path"], "xactorscmd.bat", False),
+            (os.path.join(base_dir, "system", "targetsystem.tsd") if base_dir else "system\\targetsystem.tsd", "targetsystem.tsd", False),
+            (self.get_full_default_tcl_path(), "haps_control_default.tcl", False)
         ]
         
-        for path, desc in paths:
+        # 检查TCL脚本路径
+        tcl_paths = [
+            (self.config["load_all_tcl"], "Load All TCL", False),
+            (self.config["load_master_tcl"], "Load Master TCL", False),
+            (self.config["load_slave_tcl"], "Load Slave TCL", False),
+            (self.config["reset_all_tcl"], "Reset All TCL", False),
+            (self.config["reset_master_tcl"], "Reset Master TCL", False),
+            (self.config["reset_slave_tcl"], "Reset Slave TCL", False)
+        ]
+        
+        file_paths.extend(tcl_paths)
+        
+        # 检查所有文件路径
+        for path, desc, is_dir in file_paths:
             if not path:
                 continue
+                
+            # 先检查原始路径
+            found, full_path = self.check_path(path, desc, is_dir, return_full_path=True)
+            
+            # 如果没找到，尝试用基础路径拼接
+            if not found and base_dir and not os.path.isabs(path):
+                combined_path = os.path.join(base_dir, path).replace("/", "\\")
+                self.sync_log(f"尝试基础路径拼接：{combined_path}")
+                self.check_path(combined_path, f"{desc} (基础路径拼接)", is_dir)
+
+    def check_path(self, path, description, is_directory=False, return_full_path=False):
+        """检查路径是否存在"""
+        try:
+            # 处理路径格式
             path = path.replace("/", "\\")
-            cmd = f'if exist "{path}" (echo EXIST) else (echo NOT_EXIST)'
-            try:
-                stdin, stdout, stderr = self.ssh_client.exec_command(cmd, timeout=5)
-                output_bytes = stdout.read()
-                error_bytes = stderr.read()
-                
-                output = self.process_data(output_bytes)
-                error = self.process_data(error_bytes)
-                
-                if error:
-                    self.sync_log(f"[{desc}] 检查错误：{error}")
-                elif output == "EXIST" or "4558495354" in output:
-                    self.sync_log(f"[{desc}] 路径存在：{path}")
+            
+            # 构建检查命令
+            if is_directory:
+                # 目录检查：存在且是目录
+                cmd = f'if exist "{path}" (if exist "{path}\\*" (echo DIR_EXIST) else (echo NOT_DIR)) else (echo NOT_EXIST)'
+            else:
+                # 文件检查：存在且是文件
+                cmd = f'if exist "{path}" (if not exist "{path}\\*" (echo FILE_EXIST) else (echo IS_DIR)) else (echo NOT_EXIST)'
+            
+            stdin, stdout, stderr = self.ssh_client.exec_command(cmd, timeout=10)
+            output_bytes = stdout.read()
+            error_bytes = stderr.read()
+            
+            output = self.process_data(output_bytes).strip()
+            error = self.process_data(error_bytes)
+            
+            if error:
+                self.sync_log(f"[{description}] 检查错误：{error}")
+                return (False, path) if return_full_path else False
+            
+            # 处理检查结果
+            if is_directory:
+                if output == "DIR_EXIST" or "4449525f4558495354" in output:  # DIR_EXIST的十六进制
+                    self.sync_log(f"[{description}] 目录存在：{path}")
+                    return (True, path) if return_full_path else True
+                elif output == "NOT_DIR":
+                    self.sync_log(f"[{description}] 路径存在但不是目录：{path}")
+                    return (False, path) if return_full_path else False
                 else:
-                    self.sync_log(f"[{desc}] 路径不存在：{path}")
-                    messagebox.showwarning("路径警告", f"[{desc}] 路径不存在：{path}")
-            except Exception as e:
-                self.sync_log(f"[{desc}] 检查失败：{str(e)}")
+                    self.sync_log(f"[{description}] 目录不存在：{path}")
+                    return (False, path) if return_full_path else False
+            else:
+                if output == "FILE_EXIST" or "46494C455F4558495354" in output:  # FILE_EXIST的十六进制
+                    self.sync_log(f"[{description}] 文件存在：{path}")
+                    return (True, path) if return_full_path else True
+                elif output == "IS_DIR":
+                    self.sync_log(f"[{description}] 路径存在但不是文件：{path}")
+                    return (False, path) if return_full_path else False
+                else:
+                    self.sync_log(f"[{description}] 文件不存在：{path}")
+                    return (False, path) if return_full_path else False
+                    
+        except Exception as e:
+            self.sync_log(f"[{description}] 检查失败：{str(e)}")
+            return (False, path) if return_full_path else False
 
     # 命令执行逻辑
     def queue_command(self, cmd_type):
@@ -1031,7 +1181,7 @@ class HAPSAutomationGUI:
         
         self.update_exec_status()
 
-    def process_command_queue(self):
+    def process_command_queue(self, *args):
         """处理命令队列"""
         self.is_processing = True
         self.update_exec_status()
@@ -1090,7 +1240,18 @@ class HAPSAutomationGUI:
                     default_content = f.read()
             else:
                 # SSH模式：通过命令读取
-                cat_cmd = f'type "{default_tcl_path}"'  # Windows系统使用type命令
+                # 先检查文件是否存在，如果不存在尝试用基础路径拼接
+                file_exists, full_path = self.check_path(default_tcl_path, "默认TCL文件", False, True)
+                
+                if not file_exists and base_dir and not os.path.isabs(default_tcl_path):
+                    self.sync_log(f"默认TCL文件不存在，尝试基础路径拼接...")
+                    default_tcl_path = os.path.join(base_dir, default_tcl_path).replace("/", "\\")
+                    file_exists, full_path = self.check_path(default_tcl_path, "默认TCL文件(拼接后)", False, True)
+                
+                if not file_exists:
+                    raise Exception(f"默认TCL文件不存在：{default_tcl_path}")
+                
+                cat_cmd = f'type "{full_path}"'  # Windows系统使用type命令
                 stdin, stdout, stderr = self.ssh_client.exec_command(cat_cmd, timeout=30)
                 default_content_bytes = stdout.read()
                 error_bytes = stderr.read()
@@ -1164,22 +1325,27 @@ class HAPSAutomationGUI:
             # 1. 验证必要路径配置
             haps_ctrl = self.config["haps_control_path"]
             xactorscmd = self.config["xactorscmd_path"]
+            base_dir = self.config.get("base_dir", "").strip()
             
             if not haps_ctrl or not xactorscmd:
                 raise ValueError("haps100control和xactorscmd路径不能为空")
+            
+            # 处理haps_control路径
+            resolved_haps = self.resolve_path(haps_ctrl, base_dir)
+            # 处理xactorscmd路径
+            resolved_xactor = self.resolve_path(xactorscmd, base_dir)
             
             # 2. 生成临时TCL文件
             temp_tcl_path = self.generate_temp_tcl_file(custom_command)
             
             # 3. 构建执行命令
-            base_dir = self.config.get("base_dir", "").strip()
             mode = self.config.get("mode", "local")
             
             # 构建命令
             if base_dir:
-                cmd = f'cd /d "{base_dir}" && call "{haps_ctrl}" "{xactorscmd}" "{temp_tcl_path}"'
+                cmd = f'cd /d "{base_dir}" && call "{resolved_haps}" "{resolved_xactor}" "{temp_tcl_path}"'
             else:
-                cmd = f'call "{haps_ctrl}" "{xactorscmd}" "{temp_tcl_path}"'
+                cmd = f'call "{resolved_haps}" "{resolved_xactor}" "{temp_tcl_path}"'
             
             self.sync_log(f"执行命令：{cmd}")
             
@@ -1257,17 +1423,21 @@ class HAPSAutomationGUI:
             }
             tcl_script = tcl_map[cmd_type]
             
-            if tcl_script and not tcl_script.startswith(('C:', 'D:', '\\', '/')) and base_dir:
-                tcl_script = f"{base_dir}\\{tcl_script}"
+            # 处理路径：先检查原始路径，找不到则尝试用基础路径拼接
+            resolved_tcl = self.resolve_path(tcl_script, base_dir)
+            if not resolved_tcl:
+                raise ValueError(f"找不到{cmd_type}的TCL脚本：{tcl_script}")
             
-            if not tcl_script:
-                raise ValueError(f"未配置{cmd_type}的TCL脚本路径")
+            # 处理haps_control路径
+            resolved_haps = self.resolve_path(haps_ctrl, base_dir)
+            # 处理xactorscmd路径
+            resolved_xactor = self.resolve_path(xactorscmd, base_dir)
             
             # 构建命令
             if base_dir:
-                cmd = f'cd /d "{base_dir}" && call "{haps_ctrl}" "{xactorscmd}" "{tcl_script}"'
+                cmd = f'cd /d "{base_dir}" && call "{resolved_haps}" "{resolved_xactor}" "{resolved_tcl}"'
             else:
-                cmd = f'call "{haps_ctrl}" "{xactorscmd}" "{tcl_script}"'
+                cmd = f'call "{resolved_haps}" "{resolved_xactor}" "{resolved_tcl}"'
             
             self.sync_log(f"构建命令：{cmd}")
             
@@ -1326,6 +1496,54 @@ class HAPSAutomationGUI:
             self.sync_log(f"HAPS命令执行异常：{str(e)}")
             messagebox.showerror("执行异常", str(e))
             return False, str(e)
+
+    def resolve_path(self, path, base_dir):
+        """解析路径：如果路径不存在，尝试用基础路径拼接"""
+        if not path:
+            return None
+            
+        mode = self.config.get("mode", "local")
+        resolved_path = path
+        
+        # 检查路径是否存在
+        if mode == "local":
+            # 本地模式检查
+            if not os.path.exists(resolved_path):
+                # 尝试用基础路径拼接
+                if base_dir and not os.path.isabs(resolved_path):
+                    combined_path = os.path.join(base_dir, resolved_path)
+                    if os.path.exists(combined_path):
+                        self.sync_log(f"路径不存在，使用基础路径拼接：{combined_path}")
+                        resolved_path = combined_path
+                    else:
+                        self.sync_log(f"路径不存在：{resolved_path} 和 {combined_path}")
+                        return None
+                else:
+                    self.sync_log(f"路径不存在：{resolved_path}")
+                    return None
+        else:
+            # SSH模式检查
+            if not self.ssh_connected:
+                return resolved_path
+                
+            # 先检查原始路径
+            exists, full_path = self.check_path(resolved_path, "路径解析", False, True)
+            
+            # 如果不存在，尝试用基础路径拼接
+            if not exists and base_dir and not os.path.isabs(resolved_path):
+                combined_path = os.path.join(base_dir, resolved_path).replace("/", "\\")
+                exists, full_path = self.check_path(combined_path, "路径解析(拼接后)", False, True)
+                if exists:
+                    self.sync_log(f"路径不存在，使用基础路径拼接：{combined_path}")
+                    resolved_path = combined_path
+                else:
+                    self.sync_log(f"路径不存在：{resolved_path} 和 {combined_path}")
+                    return None
+            elif not exists:
+                self.sync_log(f"路径不存在：{resolved_path}")
+                return None
+                
+        return resolved_path
 
     def run_remote_command(self, cmd):
         """执行远程命令（SSH模式）"""
