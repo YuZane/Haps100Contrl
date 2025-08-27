@@ -333,6 +333,9 @@ class SSHConfigPanel(ttk.Frame):
         # 绑定连接状态更新事件
         self.app.root.bind("<<SSHStatusChanged>>", self.update_ssh_status)
         self.app.root.bind("<<ModeChanged>>", self.update_mode_visibility)
+
+        # 初始化时强制更新模式可见性
+        self.update_mode_visibility(None)
         
     def create_widgets(self):
         """创建SSH配置界面控件"""
