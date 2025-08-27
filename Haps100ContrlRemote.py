@@ -466,7 +466,7 @@ class SSHConfigPanel(ttk.Frame):
             self.ssh_btn.configure(text="连接")
 
 class AutomationPanel(ttk.Frame):
-    """自动化操作面板"""
+    """常规操作面板"""
     def __init__(self, parent, app):
         super().__init__(parent)
         self.app = app
@@ -496,7 +496,7 @@ class AutomationPanel(ttk.Frame):
         self.scrollable_frame.force_update()
         
     def create_widgets(self):
-        """创建自动化操作界面控件"""
+        """创建常规操作界面控件"""
         row = 0
         
         # 基础路径配置
@@ -664,7 +664,7 @@ class AutomationPanel(ttk.Frame):
         pass
         
     def load_config(self):
-        """加载自动化操作配置"""
+        """加载常规操作配置"""
         self.base_dir_var.set(self.app.config["base_dir"])
         self.haps_control_var.set(self.app.config["haps_control_path"])
         self.xactorscmd_var.set(self.app.config["xactorscmd_path"])
@@ -676,7 +676,7 @@ class AutomationPanel(ttk.Frame):
         self.update_exec_status(None)
         
     def save_config(self):
-        """保存自动化操作配置"""
+        """保存常规操作配置"""
         self.app.config["base_dir"] = self.base_dir_var.get().strip()
         self.app.config["haps_control_path"] = self.haps_control_var.get().strip()
         self.app.config["xactorscmd_path"] = self.xactorscmd_var.get().strip()
@@ -902,10 +902,10 @@ class HAPSAutomationGUI:
             "base_dir": "D:\\zxl_haps12\\mc8860\\mc20l\\mc20l_haps100_va_v2024",
             "xactorscmd_path": self.default_xactorscmd,
             "haps_control_path": "tcl\\haps100control.bat",
-            "load_all_tcl": "tcl\\load_all.tcl",
+            "load_all_tcl": "tcl\\load.tcl",
             "load_master_tcl": "tcl\\load_master.tcl",
             "load_slave_tcl": "tcl\\load_slave.tcl",
-            "reset_all_tcl": "tcl\\reset_all.tcl",
+            "reset_all_tcl": "tcl\\reset.tcl",
             "reset_master_tcl": "tcl\\reset_master.tcl",
             "reset_slave_tcl": "tcl\\reset_slave.tcl",
             "custom_commands": [""],
@@ -943,7 +943,7 @@ class HAPSAutomationGUI:
         
         # 添加到标签页
         self.notebook.add(self.ssh_panel, text="连接配置")
-        self.notebook.add(self.automation_panel, text="自动化操作")
+        self.notebook.add(self.automation_panel, text="常规操作")
         self.notebook.add(self.custom_commands_panel, text="自定义命令")
         
         # 右侧日志区
