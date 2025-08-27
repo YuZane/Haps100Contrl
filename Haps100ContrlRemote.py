@@ -242,7 +242,8 @@ class RemoteFileBrowser(tk.Toplevel):
                 self.file_tree.insert("", tk.END, values=(file_name, "文件"))
                 
         except Exception as e:
-            messagebox.showerror("错误", f"加载目录失败：{str(e)}")
+            print()
+            # messagebox.showerror("错误", f"加载目录失败：{str(e)}")
     
     def on_item_double_click(self, event):
         """双击项目处理"""
@@ -447,7 +448,7 @@ class SSHConfigPanel(ttk.Frame):
             self.app.disconnect_ssh()
         else:
             # 更新配置后再连接
-            self.save_config()
+            # self.save_config()
             threading.Thread(target=self.app.connect_ssh, daemon=True).start()
             
     def update_ssh_status(self, event):
@@ -548,19 +549,6 @@ class AutomationPanel(ttk.Frame):
         row += 1
         
         config_row = 0
-        # haps100control路径
-        haps_frame = ttk.Frame(config_frame)
-        haps_frame.grid(row=config_row, column=0, columnspan=2, sticky=tk.EW, padx=8, pady=8)
-        haps_frame.columnconfigure(1, weight=1)
-        
-        ttk.Label(haps_frame, text="haps100control路径:").grid(row=0, column=0, sticky=tk.W, padx=8, pady=0)
-        self.haps_control_var = tk.StringVar()
-        ttk.Entry(haps_frame, textvariable=self.haps_control_var).grid(row=0, column=1, sticky=tk.EW, padx=8, pady=0)
-        self.browse_haps_btn = ttk.Button(haps_frame, text="浏览...", width=8,
-                                       command=lambda: self.browse_path(self.haps_control_var, file_ext=".bat"))
-        self.browse_haps_btn.grid(row=0, column=2, padx=8, pady=0)
-        config_row += 1
-        
         # xactorscmd路径
         xactor_frame = ttk.Frame(config_frame)
         xactor_frame.grid(row=config_row, column=0, columnspan=2, sticky=tk.EW, padx=8, pady=8)
@@ -572,6 +560,21 @@ class AutomationPanel(ttk.Frame):
         self.browse_xactor_btn = ttk.Button(xactor_frame, text="浏览...", width=8,
                                          command=lambda: self.browse_path(self.xactorscmd_var, file_ext=".bat"))
         self.browse_xactor_btn.grid(row=0, column=2, padx=8, pady=0)
+
+        config_row += 1
+        # haps100control路径
+        haps_frame = ttk.Frame(config_frame)
+        haps_frame.grid(row=config_row, column=0, columnspan=2, sticky=tk.EW, padx=8, pady=8)
+        haps_frame.columnconfigure(1, weight=1)
+        
+        ttk.Label(haps_frame, text="haps100control路径:").grid(row=0, column=0, sticky=tk.W, padx=8, pady=0)
+        self.haps_control_var = tk.StringVar()
+        ttk.Entry(haps_frame, textvariable=self.haps_control_var).grid(row=0, column=1, sticky=tk.EW, padx=8, pady=0)
+        self.browse_haps_btn = ttk.Button(haps_frame, text="浏览...", width=8,
+                                       command=lambda: self.browse_path(self.haps_control_var, file_ext=".bat"))
+        self.browse_haps_btn.grid(row=0, column=2, padx=8, pady=0)
+        
+
         config_row += 1
         
         # TCL路径配置
@@ -885,7 +888,6 @@ class HAPSAutomationGUI:
         
         # 配置相关初始化
         self.config_file = "haps_config.json"
-        self.default_haps_control = "C:\\Synopsys\\protocomp-rtV-2024.09\\bin\\haps100control.bat"
         self.default_xactorscmd = "C:\\Synopsys\\protocomp-rtV-2024.09\\bin\\xactorscmd.bat"
         
         self.config = {
@@ -895,8 +897,8 @@ class HAPSAutomationGUI:
             "ssh_user": "admin",
             "ssh_password": "",
             "base_dir": "D:\\zxl_haps12\\mc8860\\mc20l\\mc20l_haps100_va_v2024",
-            "haps_control_path": self.default_haps_control,
             "xactorscmd_path": self.default_xactorscmd,
+            "haps_control_path": "tcl\\haps100control.bat",
             "load_all_tcl": "tcl\\load_all.tcl",
             "load_master_tcl": "tcl\\load_master.tcl",
             "load_slave_tcl": "tcl\\load_slave.tcl",
