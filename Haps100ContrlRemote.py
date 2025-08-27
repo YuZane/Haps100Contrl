@@ -58,12 +58,14 @@ class ScrollableFrame(ttk.Frame):
         self.canvas.configure(scrollregion=self.canvas.bbox("all"))
 
 class RemoteFileBrowser(tk.Toplevel):
-    """远程文件浏览器对话框 - 增加手动输入路径和回退上级目录功能"""
-    def __init__(self, parent, ssh_client, initial_dir="/"):
+    """远程文件浏览器对话框 - 优化相对路径处理，自动拼接基础路径"""
+    def __init__(self, parent, ssh_client, initial_dir="/", base_dir=""):
         super().__init__(parent)
         self.parent = parent
         self.ssh_client = ssh_client
-        self.current_dir = initial_dir
+        self.base_dir = base_dir  # 新增：基础路径，用于拼接相对路径
+        self.original_initial_dir = initial_dir  # 保存原始初始目录
+        self.current_dir = self.resolve_initial_dir(initial_dir)  # 解析初始目录
         self.selected_path = None
         
         self.title("浏览远程文件")
@@ -80,6 +82,38 @@ class RemoteFileBrowser(tk.Toplevel):
         self.transient(parent)
         self.grab_set()
         self.wait_window(self)
+    
+    def resolve_initial_dir(self, initial_dir):
+        """解析初始目录，处理相对路径"""
+        if not initial_dir or initial_dir == ".":
+            return self.base_dir if self.base_dir else "/"
+            
+        # 检查是否为绝对路径
+        if self.is_absolute_path(initial_dir):
+            return initial_dir
+            
+        # 如果是相对路径且有基础路径，则拼接
+        if self.base_dir:
+            combined = os.path.join(self.base_dir, initial_dir).replace("/", "\\")
+            self.parent.sync_log(f"解析相对路径：{initial_dir} -> 基础路径拼接：{combined}")
+            return combined
+            
+        return initial_dir
+    
+    def is_absolute_path(self, path):
+        """判断路径是否为绝对路径"""
+        if not path:
+            return False
+            
+        # Windows绝对路径判断
+        if (len(path) > 1 and path[1] == ':') or path.startswith('\\\\'):
+            return True
+            
+        # Unix/Linux绝对路径判断
+        if path.startswith('/'):
+            return True
+            
+        return False
     
     def create_widgets(self):
         """创建远程文件浏览器界面控件"""
@@ -102,17 +136,28 @@ class RemoteFileBrowser(tk.Toplevel):
         self.go_btn = ttk.Button(nav_frame, text="转到", command=self.navigate_to_path)
         self.go_btn.pack(side=tk.LEFT, padx=5)
         
+        # 路径提示
+        hint_frame = ttk.Frame(self)
+        hint_frame.pack(fill=tk.X, padx=10)
+        ttk.Label(
+            hint_frame, 
+            text=f"基础路径: {self.base_dir if self.base_dir else '未设置'} - 相对路径将自动拼接基础路径", 
+            foreground="gray"
+        ).pack(anchor=tk.W, padx=5)
+        
         # 文件列表
         list_frame = ttk.Frame(self)
         list_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
         
         # 列表视图
-        columns = ("name", "type")
+        columns = ("name", "type", "path")
         self.file_tree = ttk.Treeview(list_frame, columns=columns, show="headings")
         self.file_tree.heading("name", text="名称")
         self.file_tree.heading("type", text="类型")
-        self.file_tree.column("name", width=300)
+        self.file_tree.heading("path", text="完整路径")
+        self.file_tree.column("name", width=200)
         self.file_tree.column("type", width=100)
+        self.file_tree.column("path", width=350)
         
         # 滚动条
         scrollbar = ttk.Scrollbar(list_frame, orient="vertical", command=self.file_tree.yview)
@@ -153,13 +198,19 @@ class RemoteFileBrowser(tk.Toplevel):
         self.load_directory_contents()
     
     def navigate_to_path(self):
-        """导航到输入框中的路径"""
-        path = self.path_var.get().strip()
-        if not path:
+        """导航到输入框中的路径 - 优化相对路径处理"""
+        input_path = self.path_var.get().strip()
+        if not input_path:
             return
             
+        # 处理相对路径
+        resolved_path = input_path
+        if not self.is_absolute_path(input_path) and self.base_dir:
+            resolved_path = os.path.join(self.base_dir, input_path).replace("/", "\\")
+            self.parent.sync_log(f"输入相对路径，自动拼接基础路径：{input_path} -> {resolved_path}")
+        
         # 检查路径是否存在且是目录
-        cmd = f'if exist "{path}" (if exist "{path}\\*" (echo DIR_EXIST) else (echo FILE_EXIST)) else (echo NOT_EXIST)'
+        cmd = f'if exist "{resolved_path}" (if exist "{resolved_path}\\*" (echo DIR_EXIST) else (echo FILE_EXIST)) else (echo NOT_EXIST)'
         try:
             stdin, stdout, stderr = self.ssh_client.exec_command(cmd, timeout=10)
             output_bytes = stdout.read()
@@ -172,25 +223,65 @@ class RemoteFileBrowser(tk.Toplevel):
             output = self.process_data(output_bytes).strip()
             
             if output == "DIR_EXIST" or "4449525f4558495354" in output:  # DIR_EXIST的十六进制
-                self.current_dir = path
+                self.current_dir = resolved_path
                 self.load_directory_contents()
             elif output == "FILE_EXIST":
                 # 如果是文件，导航到它所在的目录
-                dir_path = os.path.dirname(path)
+                dir_path = os.path.dirname(resolved_path)
                 self.current_dir = dir_path
                 self.load_directory_contents()
                 # 尝试选中该文件
-                file_name = os.path.basename(path)
+                file_name = os.path.basename(resolved_path)
                 for item in self.file_tree.get_children():
                     if self.file_tree.item(item, "values")[0] == file_name:
                         self.file_tree.selection_set(item)
                         self.file_tree.see(item)
                         break
             else:
-                messagebox.showerror("错误", f"路径不存在：{path}")
-                
+                # 如果解析后的路径不存在，尝试原始输入路径
+                if resolved_path != input_path:
+                    self.parent.sync_log(f"拼接后的路径不存在，尝试原始路径：{input_path}")
+                    self._try_navigate_original_path(input_path)
+                else:
+                    messagebox.showerror("错误", f"路径不存在：{resolved_path}")
+                    
         except Exception as e:
             messagebox.showerror("错误", f"导航失败：{str(e)}")
+    
+    def _try_navigate_original_path(self, input_path):
+        """尝试导航到原始输入路径（不拼接基础路径）"""
+        cmd = f'if exist "{input_path}" (if exist "{input_path}\\*" (echo DIR_EXIST) else (echo FILE_EXIST)) else (echo NOT_EXIST)'
+        try:
+            stdin, stdout, stderr = self.ssh_client.exec_command(cmd, timeout=10)
+            output_bytes = stdout.read()
+            error_bytes = stderr.read()
+            
+            error = self.process_data(error_bytes)
+            if error:
+                raise Exception(f"检查原始路径错误：{error}")
+            
+            output = self.process_data(output_bytes).strip()
+            
+            if output == "DIR_EXIST" or "4449525f4558495354" in output:
+                self.current_dir = input_path
+                self.load_directory_contents()
+            elif output == "FILE_EXIST":
+                # 如果是文件，导航到它所在的目录
+                dir_path = os.path.dirname(input_path)
+                self.current_dir = dir_path
+                self.load_directory_contents()
+                # 尝试选中该文件
+                file_name = os.path.basename(input_path)
+                for item in self.file_tree.get_children():
+                    if self.file_tree.item(item, "values")[0] == file_name:
+                        self.file_tree.selection_set(item)
+                        self.file_tree.see(item)
+                        break
+            else:
+                messagebox.showerror("错误", f"路径不存在：{input_path}（已尝试基础路径拼接）")
+                
+        except Exception as e:
+            messagebox.showerror("错误", f"原始路径导航失败：{str(e)}")
     
     def load_directory_contents(self):
         """加载目录内容"""
@@ -215,6 +306,12 @@ class RemoteFileBrowser(tk.Toplevel):
                     messagebox.showwarning("权限不足", f"没有权限访问目录：{self.current_dir}")
                     return
                 else:
+                    # 如果当前目录访问失败，尝试基础路径
+                    if self.base_dir and self.current_dir != self.base_dir:
+                        self.parent.sync_log(f"当前目录访问失败，尝试基础路径：{self.base_dir}")
+                        self.current_dir = self.base_dir
+                        self.load_directory_contents()
+                        return
                     raise Exception(f"读取目录错误：{error}")
             
             # 处理目录
@@ -222,7 +319,8 @@ class RemoteFileBrowser(tk.Toplevel):
             dirs = [d for d in dirs if d.strip()]
             
             for dir_name in dirs:
-                self.file_tree.insert("", tk.END, values=(dir_name, "目录"))
+                full_path = f"{self.current_dir}\\{dir_name}" if not self.current_dir.endswith('\\') else f"{self.current_dir}{dir_name}"
+                self.file_tree.insert("", tk.END, values=(dir_name, "目录", full_path))
             
             # 列出文件
             cmd = f'dir /b /a-d "{self.current_dir}"'  # 列出文件
@@ -239,7 +337,8 @@ class RemoteFileBrowser(tk.Toplevel):
             files = [f for f in files if f.strip()]
             
             for file_name in files:
-                self.file_tree.insert("", tk.END, values=(file_name, "文件"))
+                full_path = f"{self.current_dir}\\{file_name}" if not self.current_dir.endswith('\\') else f"{self.current_dir}{file_name}"
+                self.file_tree.insert("", tk.END, values=(file_name, "文件", full_path))
                 
         except Exception as e:
             messagebox.showerror("错误", f"加载目录失败：{str(e)}")
@@ -253,14 +352,11 @@ class RemoteFileBrowser(tk.Toplevel):
         item = selection[0]
         item_name = self.file_tree.item(item, "values")[0]
         item_type = self.file_tree.item(item, "values")[1]
+        full_path = self.file_tree.item(item, "values")[2]
         
         if item_type == "目录":
             # 进入子目录
-            if self.current_dir.endswith(('\\', '/')):
-                new_dir = f"{self.current_dir}{item_name}"
-            else:
-                new_dir = f"{self.current_dir}\\{item_name}"
-            self.current_dir = new_dir
+            self.current_dir = full_path
             self.load_directory_contents()
     
     def on_select(self):
@@ -273,14 +369,8 @@ class RemoteFileBrowser(tk.Toplevel):
             return
             
         item = selection[0]
-        item_name = self.file_tree.item(item, "values")[0]
-        item_type = self.file_tree.item(item, "values")[1]
+        full_path = self.file_tree.item(item, "values")[2]
         
-        if self.current_dir.endswith(('\\', '/')):
-            full_path = f"{self.current_dir}{item_name}"
-        else:
-            full_path = f"{self.current_dir}\\{item_name}"
-            
         self.selected_path = full_path
         self.destroy()
     
@@ -612,7 +702,7 @@ class AutomationPanel(ttk.Frame):
         self.scrollable_frame.force_update()
         
     def browse_path(self, var, is_directory=False, file_ext=""):
-        """浏览选择路径"""
+        """浏览选择路径 - 传递基础路径给文件浏览器"""
         mode = self.app.config.get("mode", "local")
         
         if mode == "local":
@@ -634,7 +724,7 @@ class AutomationPanel(ttk.Frame):
             if path:
                 var.set(path)
         else:
-            # SSH模式下的远程文件选择
+            # SSH模式下的远程文件选择 - 传递基础路径
             if not self.app.ssh_connected:
                 messagebox.showwarning("未连接", "请先建立SSH连接")
                 return
@@ -642,10 +732,13 @@ class AutomationPanel(ttk.Frame):
             try:
                 # 获取当前路径作为初始目录
                 current_path = var.get().strip()
-                initial_dir = os.path.dirname(current_path) if current_path else self.app.config.get("base_dir", "")
+                initial_dir = os.path.dirname(current_path) if current_path else ""
                 
-                # 打开远程文件浏览器
-                browser = RemoteFileBrowser(self.parent, self.app.ssh_client, initial_dir)
+                # 获取基础路径
+                base_dir = self.app.config.get("base_dir", "").strip()
+                
+                # 打开远程文件浏览器，传入基础路径
+                browser = RemoteFileBrowser(self.parent, self.app.ssh_client, initial_dir, base_dir)
                 if browser.selected_path:
                     var.set(browser.selected_path)
             except Exception as e:
@@ -764,7 +857,7 @@ class CustomCommandsPanel(ttk.Frame):
             row += 1
         
     def browse_path(self, var, file_ext=""):
-        """浏览选择路径"""
+        """浏览选择路径 - 传递基础路径给文件浏览器"""
         mode = self.app.config.get("mode", "local")
         
         if mode == "local":
@@ -779,7 +872,7 @@ class CustomCommandsPanel(ttk.Frame):
             if path:
                 var.set(path)
         else:
-            # SSH模式下的远程文件选择
+            # SSH模式下的远程文件选择 - 传递基础路径
             if not self.app.ssh_connected:
                 messagebox.showwarning("未连接", "请先建立SSH连接")
                 return
@@ -787,10 +880,13 @@ class CustomCommandsPanel(ttk.Frame):
             try:
                 # 获取当前路径作为初始目录
                 current_path = var.get().strip()
-                initial_dir = os.path.dirname(current_path) if current_path else self.app.config.get("base_dir", "")
+                initial_dir = os.path.dirname(current_path) if current_path else ""
                 
-                # 打开远程文件浏览器
-                browser = RemoteFileBrowser(self.parent, self.app.ssh_client, initial_dir)
+                # 获取基础路径
+                base_dir = self.app.config.get("base_dir", "").strip()
+                
+                # 打开远程文件浏览器，传入基础路径
+                browser = RemoteFileBrowser(self.parent, self.app.ssh_client, initial_dir, base_dir)
                 if browser.selected_path:
                     var.set(browser.selected_path)
             except Exception as e:
@@ -1087,7 +1183,7 @@ class HAPSAutomationGUI:
             found, full_path = self.check_path(path, desc, is_dir, return_full_path=True)
             
             # 如果没找到，尝试用基础路径拼接
-            if not found and base_dir and not os.path.isabs(path):
+            if not found and base_dir and not self.is_absolute_path(path):
                 combined_path = os.path.join(base_dir, path).replace("/", "\\")
                 self.sync_log(f"尝试基础路径拼接：{combined_path}")
                 self.check_path(combined_path, f"{desc} (基础路径拼接)", is_dir)
@@ -1212,12 +1308,27 @@ class HAPSAutomationGUI:
         base_dir = self.config.get("base_dir", "").strip()
         
         # 检查是否为绝对路径
-        if os.path.isabs(default_tcl_path) or (len(default_tcl_path) > 1 and default_tcl_path[1] == ':'):
+        if self.is_absolute_path(default_tcl_path):
             return default_tcl_path
         # 否则拼接基础路径
         if base_dir:
             return os.path.join(base_dir, default_tcl_path).replace("/", "\\")
         return default_tcl_path
+
+    def is_absolute_path(self, path):
+        """判断路径是否为绝对路径"""
+        if not path:
+            return False
+            
+        # Windows绝对路径判断
+        if (len(path) > 1 and path[1] == ':') or path.startswith('\\\\'):
+            return True
+            
+        # Unix/Linux绝对路径判断
+        if path.startswith('/'):
+            return True
+            
+        return False
 
     def generate_temp_tcl_file(self, custom_command):
         """生成临时TCL文件"""
@@ -1243,7 +1354,7 @@ class HAPSAutomationGUI:
                 # 先检查文件是否存在，如果不存在尝试用基础路径拼接
                 file_exists, full_path = self.check_path(default_tcl_path, "默认TCL文件", False, True)
                 
-                if not file_exists and base_dir and not os.path.isabs(default_tcl_path):
+                if not file_exists and base_dir and not self.is_absolute_path(default_tcl_path):
                     self.sync_log(f"默认TCL文件不存在，尝试基础路径拼接...")
                     default_tcl_path = os.path.join(base_dir, default_tcl_path).replace("/", "\\")
                     file_exists, full_path = self.check_path(default_tcl_path, "默认TCL文件(拼接后)", False, True)
@@ -1510,7 +1621,7 @@ class HAPSAutomationGUI:
             # 本地模式检查
             if not os.path.exists(resolved_path):
                 # 尝试用基础路径拼接
-                if base_dir and not os.path.isabs(resolved_path):
+                if base_dir and not self.is_absolute_path(resolved_path):
                     combined_path = os.path.join(base_dir, resolved_path)
                     if os.path.exists(combined_path):
                         self.sync_log(f"路径不存在，使用基础路径拼接：{combined_path}")
@@ -1530,7 +1641,7 @@ class HAPSAutomationGUI:
             exists, full_path = self.check_path(resolved_path, "路径解析", False, True)
             
             # 如果不存在，尝试用基础路径拼接
-            if not exists and base_dir and not os.path.isabs(resolved_path):
+            if not exists and base_dir and not self.is_absolute_path(resolved_path):
                 combined_path = os.path.join(base_dir, resolved_path).replace("/", "\\")
                 exists, full_path = self.check_path(combined_path, "路径解析(拼接后)", False, True)
                 if exists:
