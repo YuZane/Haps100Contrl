@@ -753,7 +753,7 @@ class CustomCommandsPanel(ttk.Frame):
         # 参数提示
         tip_frame = ttk.Frame(self.inner_frame)
         tip_frame.grid(row=row, column=0, columnspan=2, sticky=tk.EW, pady=(0, 8))
-        ttk.Label(tip_frame, text="提示：命令将添加到临时TCL文件执行，支持参数 $HAPS_DEVICE $HAPS_SERIAL", foreground="blue").pack(anchor=tk.W)
+        ttk.Label(tip_frame, text="提示：命令将添加到临时TCL文件执行，支持参数:\n$HAPS_DEVICE、$HAPS_SERIAL、$HAPS_HANDLE。\n如：\n\tcfg_reset_set $HAPS_HANDLE FB1.uA 0\n\tcfg_reset_set $HAPS_HANDLE FB1.uA 1\n\tcfg_scan", foreground="blue").pack(anchor=tk.W)
         row += 1
         
         # 操作按钮区
