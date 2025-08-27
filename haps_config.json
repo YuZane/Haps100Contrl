@@ -1,13 +1,22 @@
 {
-    "base_dir": "",
+    "mode": "ssh",
+    "ssh_host": "10.126.91.154",
+    "ssh_port": 22,
+    "ssh_user": "dell",
+    "ssh_password": "Abcd.1234",
+    "base_dir": "D:\\zxl_haps12\\mc8860\\mc20l\\mc20l_haps100_va_v2024",
     "xactorscmd_path": "C:\\Synopsys\\protocomp-rtV-2024.09\\bin\\xactorscmd.bat",
-    "load_all_tcl": "tcl\\load_all.tcl",
+    "haps_control_path": "tcl\\haps100control.bat",
+    "load_all_tcl": "tcl\\load.tcl",
     "load_master_tcl": "tcl\\load_master.tcl",
     "load_slave_tcl": "tcl\\load_slave.tcl",
-    "reset_all_tcl": "tcl\\reset_all.tcl",
+    "reset_all_tcl": "tcl\\reset.tcl",
     "reset_master_tcl": "tcl\\reset_master.tcl",
     "reset_slave_tcl": "tcl\\reset_slave.tcl",
     "custom_commands": [
+        "cfg_reset_set $HAPS_HANDLE FB1.uA 0\n;cfg_reset_set $HAPS_HANDLE FB1.uA 1",
+        "cfg_scan",
         ""
-    ]
+    ],
+    "default_tcl_path": "tcl\\haps_control_default.tcl"
 }
