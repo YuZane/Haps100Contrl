@@ -87,8 +87,8 @@ if { [array get HAPS_STATUS STATE] != "STATE available" } {
 	
 	puts "Start HSTDM Training......"
 	#doing HSTDM training, you must have "package require proto_rt", and hmf.txt file
-	proto_rt::run_ipinfra --hmf hmf.txt --train all
-	proto_rt::run_ipinfra --hmf hmf.txt --report_global_status all
+	proto_rt::run_ipinfra -hmf hmf.txt -train all
+	proto_rt::run_ipinfra -hmf hmf.txt -report_global_status all
 	#proto_rt::run_ipinfra -hmf hmf.txt -report_verbose all
 	#Re-open handle to enable clock and issue reset
 	puts "HSTDM Training Done...."
@@ -97,8 +97,13 @@ if { [array get HAPS_STATUS STATE] != "STATE available" } {
 	#  puts [cfg_project_configure $handle $CFG_PRJ_NAME -none -clockenable]
 	#release reset
 	puts "release reset......"
-	cfg_reset_set $handle FB1.uA 0
-	cfg_reset_set $handle FB1.uA 1
+	foreach fpga $FPGA_USER_NAME {
+		if {[ cfg_status_get_done $handle $fpga]} {
+			puts "release $fpga reset!"
+			cfg_reset_set $handle $fpga  0
+			cfg_reset_set $handle $fpga  1
+		}
+	}
 	cfg_close $handle
 }
 #
