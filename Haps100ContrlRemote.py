@@ -443,7 +443,7 @@ class SSHConfigPanel(ttk.Frame):
         self.app.config["ssh_password"] = self.ssh_password_var.get().strip()
         self.app.config["mode"] = self.mode_var.get()
         self.app.save_config()
-        messagebox.showinfo("成功", "配置已保存")
+        # messagebox.showinfo("成功", "配置已保存")
         
     def toggle_ssh_connection(self):
         """切换SSH连接状态"""
@@ -618,7 +618,7 @@ class AutomationPanel(ttk.Frame):
         self.scrollable_frame.force_update()
         
     def browse_path(self, var, is_directory=False, file_ext=""):
-        """浏览选择路径"""
+        """浏览选择路径并自动保存配置"""
         mode = self.app.config.get("mode", "local")
         
         if mode == "local":
@@ -639,6 +639,7 @@ class AutomationPanel(ttk.Frame):
             
             if path:
                 var.set(path)
+                self.save_config()  # 自动保存配置
         else:
             # SSH模式下的远程文件选择
             if not self.app.ssh_connected:
@@ -654,6 +655,7 @@ class AutomationPanel(ttk.Frame):
                 browser = RemoteFileBrowser(self.parent, self.app.ssh_client, initial_dir)
                 if browser.selected_path:
                     var.set(browser.selected_path)
+                    self.save_config()  # 自动保存配置
             except Exception as e:
                 messagebox.showerror("错误", f"浏览远程文件失败：{str(e)}")
         
@@ -685,7 +687,7 @@ class AutomationPanel(ttk.Frame):
             self.app.config[key] = var.get().strip()
             
         self.app.save_config()
-        messagebox.showinfo("成功", "自动化配置已保存")
+        # messagebox.showinfo("成功", "自动化配置已保存")
         
     def update_exec_status(self, event):
         """更新执行状态显示"""
@@ -768,9 +770,14 @@ class CustomCommandsPanel(ttk.Frame):
         for i in range(3):
             ttk.Label(self.inner_frame, text="").grid(row=row, column=0, pady=10)
             row += 1
-        
+
+    def save_default_tcl_path(self):
+        """单独保存默认TCL路径配置"""
+        self.app.config["default_tcl_path"] = self.default_tcl_var.get().strip()
+        self.app.save_config()
+
     def browse_path(self, var, file_ext=""):
-        """浏览选择路径"""
+        """浏览选择路径并自动保存配置"""
         mode = self.app.config.get("mode", "local")
         
         if mode == "local":
@@ -784,6 +791,7 @@ class CustomCommandsPanel(ttk.Frame):
             
             if path:
                 var.set(path)
+                self.save_default_tcl_path()  # 新增一个保存默认TCL路径的方法
         else:
             # SSH模式下的远程文件选择
             if not self.app.ssh_connected:
@@ -799,6 +807,7 @@ class CustomCommandsPanel(ttk.Frame):
                 browser = RemoteFileBrowser(self.parent, self.app.ssh_client, initial_dir)
                 if browser.selected_path:
                     var.set(browser.selected_path)
+                    self.save_default_tcl_path()  # 自动保存配置
             except Exception as e:
                 messagebox.showerror("错误", f"浏览远程文件失败：{str(e)}")
 
