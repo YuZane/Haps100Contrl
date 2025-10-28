@@ -499,12 +499,12 @@ class AutomationPanel(ttk.Frame):
         """创建常规操作界面控件"""
         row = 0
         
-        # 基础路径配置
+        # Bitfile路径配置
         path_frame = ttk.Frame(self.inner_frame)
         path_frame.grid(row=row, column=0, columnspan=2, sticky=tk.EW, padx=8, pady=8)
         path_frame.columnconfigure(1, weight=1)
         
-        ttk.Label(path_frame, text="基础路径:").grid(row=0, column=0, sticky=tk.W, padx=8, pady=0)
+        ttk.Label(path_frame, text="Bitfile路径:").grid(row=0, column=0, sticky=tk.W, padx=8, pady=0)
         self.base_dir_var = tk.StringVar()
         ttk.Entry(path_frame, textvariable=self.base_dir_var).grid(row=0, column=1, sticky=tk.EW, padx=8, pady=0)
         self.browse_base_dir_btn = ttk.Button(path_frame, text="浏览...", width=8,
@@ -946,13 +946,13 @@ class HAPSAutomationGUI:
         self.notebook.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
         
         # 创建三个功能面板
-        self.ssh_panel = SSHConfigPanel(self.notebook, self)
         self.automation_panel = AutomationPanel(self.notebook, self)
+        self.ssh_panel = SSHConfigPanel(self.notebook, self)
         self.custom_commands_panel = CustomCommandsPanel(self.notebook, self)
         
         # 添加到标签页
-        self.notebook.add(self.ssh_panel, text="连接配置")
         self.notebook.add(self.automation_panel, text="常规操作")
+        self.notebook.add(self.ssh_panel, text="连接配置")
         self.notebook.add(self.custom_commands_panel, text="自定义命令")
         
         # 右侧日志区
@@ -1065,10 +1065,10 @@ class HAPSAutomationGUI:
         self.root.event_generate("<<SSHStatusChanged>>", when="tail")
 
     def check_remote_paths(self):
-        """检查远程关键路径 - 优化基础路径判断逻辑"""
+        """检查远程关键路径 - 优化Bitfile路径判断逻辑"""
         base_dir = self.config.get("base_dir", "").strip()
         
-        # 1. 检查基础路径（只需要是目录即可）
+        # 1. 检查Bitfile路径（只需要是目录即可）
         if base_dir:
             self.check_path(base_dir, "基础目录", is_directory=True)
         
@@ -1100,11 +1100,11 @@ class HAPSAutomationGUI:
             # 先检查原始路径
             found, full_path = self.check_path(path, desc, is_dir, return_full_path=True)
             
-            # 如果没找到，尝试用基础路径拼接
+            # 如果没找到，尝试用Bitfile路径拼接
             if not found and base_dir and not os.path.isabs(path):
                 combined_path = os.path.join(base_dir, path).replace("/", "\\")
-                self.sync_log(f"尝试基础路径拼接：{combined_path}")
-                self.check_path(combined_path, f"{desc} (基础路径拼接)", is_dir)
+                self.sync_log(f"尝试Bitfile路径拼接：{combined_path}")
+                self.check_path(combined_path, f"{desc} (Bitfile路径拼接)", is_dir)
 
     def check_path(self, path, description, is_directory=False, return_full_path=False):
         """检查路径是否存在"""
@@ -1228,7 +1228,7 @@ class HAPSAutomationGUI:
         # 检查是否为绝对路径
         if os.path.isabs(default_tcl_path) or (len(default_tcl_path) > 1 and default_tcl_path[1] == ':'):
             return default_tcl_path
-        # 否则拼接基础路径
+        # 否则拼接Bitfile路径
         if base_dir:
             return os.path.join(base_dir, default_tcl_path).replace("/", "\\")
         return default_tcl_path
@@ -1254,11 +1254,11 @@ class HAPSAutomationGUI:
                     default_content = f.read()
             else:
                 # SSH模式：通过命令读取
-                # 先检查文件是否存在，如果不存在尝试用基础路径拼接
+                # 先检查文件是否存在，如果不存在尝试用Bitfile路径拼接
                 file_exists, full_path = self.check_path(default_tcl_path, "默认TCL文件", False, True)
                 
                 if not file_exists and base_dir and not os.path.isabs(default_tcl_path):
-                    self.sync_log(f"默认TCL文件不存在，尝试基础路径拼接...")
+                    self.sync_log(f"默认TCL文件不存在，尝试Bitfile路径拼接...")
                     default_tcl_path = os.path.join(base_dir, default_tcl_path).replace("/", "\\")
                     file_exists, full_path = self.check_path(default_tcl_path, "默认TCL文件(拼接后)", False, True)
                 
@@ -1437,7 +1437,7 @@ class HAPSAutomationGUI:
             }
             tcl_script = tcl_map[cmd_type]
             
-            # 处理路径：先检查原始路径，找不到则尝试用基础路径拼接
+            # 处理路径：先检查原始路径，找不到则尝试用Bitfile路径拼接
             resolved_tcl = self.resolve_path(tcl_script, base_dir)
             if not resolved_tcl:
                 raise ValueError(f"找不到{cmd_type}的TCL脚本：{tcl_script}")
@@ -1512,7 +1512,7 @@ class HAPSAutomationGUI:
             return False, str(e)
 
     def resolve_path(self, path, base_dir):
-        """解析路径：如果路径不存在，尝试用基础路径拼接"""
+        """解析路径：如果路径不存在，尝试用Bitfile路径拼接"""
         if not path:
             return None
             
@@ -1523,11 +1523,11 @@ class HAPSAutomationGUI:
         if mode == "local":
             # 本地模式检查
             if not os.path.exists(resolved_path):
-                # 尝试用基础路径拼接
+                # 尝试用Bitfile路径拼接
                 if base_dir and not os.path.isabs(resolved_path):
                     combined_path = os.path.join(base_dir, resolved_path)
                     if os.path.exists(combined_path):
-                        self.sync_log(f"路径不存在，使用基础路径拼接：{combined_path}")
+                        self.sync_log(f"路径不存在，使用Bitfile路径拼接：{combined_path}")
                         resolved_path = combined_path
                     else:
                         self.sync_log(f"路径不存在：{resolved_path} 和 {combined_path}")
@@ -1543,12 +1543,12 @@ class HAPSAutomationGUI:
             # 先检查原始路径
             exists, full_path = self.check_path(resolved_path, "路径解析", False, True)
             
-            # 如果不存在，尝试用基础路径拼接
+            # 如果不存在，尝试用Bitfile路径拼接
             if not exists and base_dir and not os.path.isabs(resolved_path):
                 combined_path = os.path.join(base_dir, resolved_path).replace("/", "\\")
                 exists, full_path = self.check_path(combined_path, "路径解析(拼接后)", False, True)
                 if exists:
-                    self.sync_log(f"路径不存在，使用基础路径拼接：{combined_path}")
+                    self.sync_log(f"路径不存在，使用Bitfile路径拼接：{combined_path}")
                     resolved_path = combined_path
                 else:
                     self.sync_log(f"路径不存在：{resolved_path} 和 {combined_path}")
