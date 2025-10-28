@@ -910,15 +910,15 @@ class HAPSAutomationGUI:
             "ssh_password": "",
             "base_dir": "D:\\zxl_haps12\\mc8860\\mc20l\\mc20l_haps100_va_v2024",
             "xactorscmd_path": self.default_xactorscmd,
-            "haps_control_path": "tcl\\haps100control.bat",
-            "load_all_tcl": "tcl\\load.tcl",
-            "load_master_tcl": "tcl\\load_master.tcl",
-            "load_slave_tcl": "tcl\\load_slave.tcl",
-            "reset_all_tcl": "tcl\\reset.tcl",
-            "reset_master_tcl": "tcl\\reset_master.tcl",
-            "reset_slave_tcl": "tcl\\reset_slave.tcl",
+            "haps_control_path": "C:\\Synopsys\\tcl\\haps100control.bat",
+            "load_all_tcl": "C:\\Synopsys\\tcl\\load.tcl",
+            "load_master_tcl": "C:\\Synopsys\\tcl\\load_master.tcl",
+            "load_slave_tcl": "C:\\Synopsys\\tcl\\load_slave.tcl",
+            "reset_all_tcl": "C:\\Synopsys\\tcl\\reset.tcl",
+            "reset_master_tcl": "C:\\Synopsys\\tcl\\reset_master.tcl",
+            "reset_slave_tcl": "C:\\Synopsys\\tcl\\reset_slave.tcl",
             "custom_commands": [""],
-            "default_tcl_path": "tcl\\haps_control_default.tcl"
+            "default_tcl_path": "C:\\Synopsys\\tcl\\haps_control_default.tcl"
         }
         
         # 加载配置
