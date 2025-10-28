@@ -921,6 +921,9 @@ class HAPSAutomationGUI:
             "default_tcl_path": "C:\\Synopsys\\tcl\\haps_control_default.tcl"
         }
         
+        # log
+        self.print_info()
+        
         # 加载配置
         self.load_config()
         
@@ -1667,6 +1670,16 @@ class HAPSAutomationGUI:
             self._pending_logs = []
         finally:
             self._freeze_ui = False
+
+    def print_info(self):
+        self.sync_log(r"使用说明：")
+        self.sync_log(r"1. 工具支持本地模式和远程模式，通过'连接配置'界面选择，配置好后点击'保存配置'，方便下次连接")
+        self.sync_log(r"2. 选择bitfile路径，如：D:\zxl_haps12\mc8860\rtl0p1\mc8860_fpga_tag1019_va_bsp1027 (远程模式时，打开的是远程目录)")
+        self.sync_log(r"3. 点击load all或者其他load按键，加载bitfile")
+        self.sync_log(r"4. 点击reset haps或者其他reset按键，执行reset操作")
+        self.sync_log("")
+        self.sync_log(r"https://github.com/YuZane/Haps100Contrl/")
+        self.sync_log("")
 
     def load_config(self):
         """加载配置"""
