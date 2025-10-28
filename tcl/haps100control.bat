@@ -1,13 +1,12 @@
 @echo off
+chcp 65001 >nul 2>&1  :: Force UTF-8 encoding (no Chinese support)
 setlocal enabledelayedexpansion
 
-REM 定义默认值
+REM Define default values
 SET DEFAULT_XACTORSCMD="C:\Synopsys\protocomp-rtV-2024.09\bin\xactorscmd.bat"
 SET DEFAULT_TCL_SCRIPT="tcl\reset.tcl"
 
-REM 接收参数（如果有传递）
-REM 第一个参数：xactorscmd.bat路径
-REM 第二个参数：TCL脚本路径
+REM Receive parameters if provided
 if not "%~1"=="" (
     SET XACTORSCMD="%~1"
 ) else (
@@ -20,33 +19,32 @@ if not "%~2"=="" (
     SET TCL_SCRIPT=%DEFAULT_TCL_SCRIPT%
 )
 
-REM 检查xactorscmd是否存在
+REM Check if xactorscmd exists
 if not exist %XACTORSCMD% (
-    echo 错误：未找到xactorscmd.bat - %XACTORSCMD%
+    echo Error: xactorscmd.bat not found - %XACTORSCMD%
     pause
     exit /b 1
 )
 
-REM 检查TCL脚本是否存在
+REM Check if TCL script exists
 if not exist %TCL_SCRIPT% (
-    echo 错误：未找到TCL脚本 - %TCL_SCRIPT%
+    echo Error: TCL script not found - %TCL_SCRIPT%
     pause
     exit /b 1
 )
 
-REM 创建临时命令文件，包含要执行的confprosh命令
+REM Create temporary command file
 set CMD_FILE=%temp%\haps_commands.txt
 echo confprosh %TCL_SCRIPT% > "%CMD_FILE%"
 echo exit >> "%CMD_FILE%" 
 
-REM 启动xactorscmd.bat，并将临时命令文件作为输入注入
-REM 使用/c参数确保执行后自动退出
+REM Execute xactorscmd with the command file
 cmd /c "%XACTORSCMD% < "%CMD_FILE%""
 
-REM 记录返回代码
+REM Capture return code
 set RETURN_CODE=%errorlevel%
 
-REM 清理临时文件
+REM Cleanup temporary file
 del /f /q "%CMD_FILE%" >nul 2>&1
 
 exit /b %RETURN_CODE%
